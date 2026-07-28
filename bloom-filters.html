@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bloom Filters — the cheat sheet</title>
+<meta name="description" content="How a Bloom filter checks 'is this in the set?' in tiny memory — the false-positive math, real-world uses, and interview Q&A. SystemSketch cheat sheet, Day 11.">
+<style>
+  :root{
+    --paper:#F0EEE6; --ink:#141413; --manilla:#F5E3C7; --tint:#F2ECE0;
+    --taupe:#8A8172; --kraft:#B8A98C; --hair:rgba(20,20,19,.14); --green:#3F7A4F;
+    --clay:#CC785C; --clay-line:#D97757;
+    --dbg:#1A1915; --dtext:#E8E4D8; --dhair:rgba(232,228,216,.16); --dtaupe:#9C927E;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --chip:inset 0 1px 0 rgba(255,255,255,.7),0 1px 1px rgba(20,20,19,.04),0 5px 12px rgba(20,20,19,.08);
+    --shadow:0 1px 1px rgba(20,20,19,.04),0 6px 14px rgba(20,20,19,.08),0 18px 40px rgba(20,20,19,.06);
+    --shadowd:0 1px 1px rgba(0,0,0,.3),0 8px 20px rgba(0,0,0,.4),0 24px 50px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:#E5E0D3;color:var(--ink);font-family:var(--sans);
+       -webkit-font-smoothing:antialiased;line-height:1.5;}
+  .wrap{max-width:900px;margin:0 auto;padding:34px 24px 90px;}
+  .grain{position:absolute;inset:0;pointer-events:none;opacity:.05;mix-blend-mode:multiply;
+         background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+  a{color:var(--clay);text-decoration:none;} a:hover{color:var(--clay-line);}
+  .card{position:relative;border:1px solid var(--hair);background:var(--paper);border-radius:14px;
+        box-shadow:var(--shadow);overflow:hidden;}
+  .in{position:relative;}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--taupe);}
+  .eyebrow{font-weight:700;font-size:12px;letter-spacing:.15em;text-transform:uppercase;}
+  .lead{font-family:var(--serif);font-style:italic;color:#403d37;}
+  .mono{font-family:var(--mono);}
+  .clay{color:var(--clay);} .green{color:var(--green);}
+  h1{font-family:var(--serif);font-weight:600;font-size:54px;line-height:1.02;letter-spacing:-.02em;margin:20px 0 0;}
+  h2{font-family:var(--serif);font-weight:600;font-size:30px;letter-spacing:-.02em;margin:0 0 4px;}
+  .u{position:relative;white-space:nowrap;}
+  .u svg{position:absolute;left:-2%;bottom:-9px;width:104%;height:12px;overflow:visible;}
+  .two{display:flex;flex-wrap:wrap;gap:22px;margin-bottom:22px;}
+  .two .card{flex:1 1 300px;}
+  .row{font-family:var(--mono);font-size:12.5px;line-height:2;color:#4a463f;}
+  .row b{color:var(--taupe);font-weight:400;}
+  ul.lines{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;}
+  ul.lines li{display:flex;gap:11px;font-size:15px;line-height:1.55;color:var(--dtext);}
+  ul.lines .b{font-family:var(--serif);font-weight:700;color:var(--clay);}
+  .nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+  .backlink{font-size:14px;font-weight:600;color:var(--taupe);}
+  .backlink:hover{color:var(--clay);}
+  /* bit array */
+  .bits{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:4px 0;}
+  .bit{width:40px;height:52px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+       font-family:var(--mono);font-weight:700;font-size:19px;border:1.5px solid var(--hair);background:var(--tint);color:var(--kraft);box-shadow:var(--chip);}
+  .bit.on{background:var(--manilla);border-color:var(--clay);color:var(--clay);box-shadow:var(--chip),0 0 0 3px rgba(204,120,92,.13);}
+  .bit.free{border-color:var(--green);color:var(--green);box-shadow:var(--chip),0 0 0 3px rgba(63,122,79,.16);}
+  .caption{text-align:center;font-family:var(--mono);font-size:12px;color:var(--taupe);margin:10px 0 2px;}
+  /* formula / sizing */
+  .fx{font-family:var(--mono);font-size:15px;background:var(--dbg);color:var(--dtext);border-radius:12px;
+      padding:16px 20px;margin:12px 0;overflow-x:auto;box-shadow:var(--shadowd);line-height:1.9;}
+  .fx .c{color:var(--clay-line);}
+  table{width:100%;border-collapse:collapse;margin:14px 0 4px;font-family:var(--mono);font-size:13.5px;}
+  th{background:var(--ink);color:var(--paper);text-align:left;padding:9px 14px;font-weight:600;letter-spacing:.02em;}
+  td{padding:9px 14px;border-top:1px solid var(--hair);color:#3a372f;}
+  tr:nth-child(even) td{background:var(--tint);}
+  /* Q&A */
+  .qa{display:flex;flex-direction:column;gap:10px;}
+  .qa details{border:1px solid var(--hair);border-radius:12px;background:var(--paper);overflow:hidden;box-shadow:var(--chip);}
+  .qa summary{cursor:pointer;list-style:none;padding:15px 20px;font-weight:600;font-size:16px;color:var(--ink);
+              display:flex;gap:12px;align-items:baseline;}
+  .qa summary::-webkit-details-marker{display:none;}
+  .qa summary::before{content:"Q";font-family:var(--serif);font-weight:700;color:var(--clay);font-size:18px;}
+  .qa summary::after{content:"+";margin-left:auto;color:var(--kraft);font-family:var(--mono);font-size:20px;}
+  .qa details[open] summary::after{content:"–";}
+  .qa details[open] summary{border-bottom:1px solid var(--hair);}
+  .qa .a{padding:14px 20px 18px 46px;color:#2c2a26;font-size:15px;line-height:1.65;}
+  .qa .a code, .ic{font-family:var(--mono);font-size:.87em;background:var(--tint);border:1px solid rgba(20,20,19,.07);border-radius:5px;padding:1px 5px;color:#7a4634;}
+  .sec{font-weight:700;font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--taupe);margin:24px 0 10px;}
+  p.body{font-size:16px;line-height:1.7;color:#2c2a26;}
+  @media (max-width:520px){h1{font-size:40px;}.bit{width:33px;height:44px;font-size:16px;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="nav">
+    <a class="backlink" href="./">← all cheat sheets</a>
+    <span class="mono" style="font-size:12px;color:var(--taupe);">SystemSketch · Day 11</span>
+  </div>
+
+  <header class="card" style="padding:38px 34px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <span class="kicker" style="display:inline-block;border:1px solid var(--hair);background:var(--tint);padding:6px 11px;border-radius:4px;">30-Day System Design · Day 11</span>
+      <h1>Bloom Filters <span style="color:var(--taupe);font-weight:400;">— the cheat sheet</span></h1>
+      <p class="lead" style="font-size:20px;margin:14px 0 0;max-width:660px;">How an app checks <span class="clay">“is this username taken?”</span> against a billion names in an instant — using a tiny row of bits instead of the database.</p>
+    </div>
+  </header>
+
+  <div class="card" style="background:var(--manilla);padding:24px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:#8a6d4e;margin-bottom:8px;">The one idea</div>
+      <div style="font-family:var(--serif);font-weight:600;font-size:26px;line-height:1.3;">A Bloom filter stores a <span class="u">fingerprint of the set<svg viewBox="0 0 160 16"><path d="M4 9 C 46 3, 118 13, 156 5" fill="none" stroke="#D97757" stroke-width="4" stroke-linecap="round"/></svg></span>, not the items. It answers <b>“definitely not”</b> or <b>“maybe”</b> — never a certain “yes.”</div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:10px;">The mental model</div>
+      <p class="body" style="margin:0;">You type a username into an app like Instagram. The instant you stop, it says <b>taken</b> or <b>available</b> — checked against a <b>billion</b> names. Keep every taken name's fingerprint in a Bloom filter: if it says <b class="green">“definitely not in the set,”</b> the name is <b>guaranteed free</b> — answer instantly, <b>no database hit</b>. If it says <b class="clay">“maybe,”</b> do <b>one</b> real lookup to confirm. Most names people try are free, so the filter handles the common case alone.</p>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:16px;">How it works — one shared bit array, <span class="mono" style="text-transform:none;letter-spacing:0;">k</span> hash functions</div>
+
+      <p class="body" style="margin:0 0 6px;"><b>Insert</b> <span class="ic">@johndoe</span> → hash it 3 ways → set bits <b>1 · 4 · 6</b> to 1:</p>
+      <div class="bits">
+        <span class="bit">0</span><span class="bit on">1</span><span class="bit">0</span><span class="bit">0</span><span class="bit on">1</span><span class="bit">0</span><span class="bit on">1</span><span class="bit">0</span>
+      </div>
+      <div class="caption">index&nbsp;&nbsp;0&nbsp;&nbsp;&nbsp;1&nbsp;&nbsp;&nbsp;2&nbsp;&nbsp;&nbsp;3&nbsp;&nbsp;&nbsp;4&nbsp;&nbsp;&nbsp;5&nbsp;&nbsp;&nbsp;6&nbsp;&nbsp;&nbsp;7</div>
+
+      <p class="body" style="margin:20px 0 6px;"><b>Query</b> <span class="ic">@janedoe</span> → hashes to <b>1 · 3 · 6</b> → bit&nbsp;3 is <b>0</b> → <b class="green">definitely NOT taken</b> (no DB hit):</p>
+      <div class="bits">
+        <span class="bit">0</span><span class="bit on">1</span><span class="bit">0</span><span class="bit free">0</span><span class="bit on">1</span><span class="bit">0</span><span class="bit on">1</span><span class="bit">0</span>
+      </div>
+
+      <p class="body" style="margin:20px 0 6px;"><b>Query</b> <span class="ic">@sara_k</span> → hashes to <b>2 · 4 · 6</b> → all <b>1</b> → <b class="clay">maybe taken</b> → one real check. Those bits were set by <b>different</b> users (john set 1·4·6, mike set 2·4·7) — nobody is <span class="ic">@sara_k</span>. That's a <b>false positive</b>:</p>
+      <div class="bits">
+        <span class="bit">0</span><span class="bit on">1</span><span class="bit on">1</span><span class="bit">0</span><span class="bit on">1</span><span class="bit">0</span><span class="bit on">1</span><span class="bit on">1</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="two">
+    <div class="card" style="padding:24px 26px;">
+      <div class="grain"></div>
+      <div class="in">
+        <div class="eyebrow green" style="margin-bottom:12px;">“Definitely not”</div>
+        <p style="font-size:15px;line-height:1.6;margin:0 0 14px;color:#2c2a26;">Any queried bit is <b>0</b>. The item was never added — <b>guaranteed</b>. Skip the expensive lookup entirely.</p>
+        <div class="row">
+          <div><b>means →</b> certainly absent</div>
+          <div><b>wrong? →</b> never (no false negatives)</div>
+          <div><b>use&nbsp;&nbsp;&nbsp;→</b> skip disk / DB / network</div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="padding:24px 26px;">
+      <div class="grain"></div>
+      <div class="in">
+        <div class="eyebrow clay" style="margin-bottom:12px;">“Maybe”</div>
+        <p style="font-size:15px;line-height:1.6;margin:0 0 14px;color:#2c2a26;">All queried bits are <b>1</b>. Probably present — but could be a <b>false positive</b> from other items' bits.</p>
+        <div class="row">
+          <div><b>means →</b> possibly present</div>
+          <div><b>wrong? →</b> sometimes (false positive)</div>
+          <div><b>then&nbsp;&nbsp;→</b> do one real check to confirm</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:24px 30px;margin-bottom:22px;border:1.5px solid var(--clay);box-shadow:var(--chip),0 0 0 4px rgba(204,120,92,.10);">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow clay" style="margin-bottom:8px;">The guarantee</div>
+      <div style="font-family:var(--serif);font-weight:600;font-size:24px;line-height:1.34;">False positives: <span class="clay">possible</span>. False negatives: <b>impossible</b>. It might send a free name for one extra check — it <b>never</b> calls a taken name free.</div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:12px;">The math — sizing it right</div>
+      <p class="body" style="margin:0 0 4px;"><span class="ic">n</span> items · <span class="ic">m</span> bits · <span class="ic">k</span> hashes · <span class="ic">p</span> false-positive rate:</p>
+      <div class="fx">
+p ≈ (1 − e<span style="font-size:.8em;">^(−kn/m)</span>)<span style="font-size:.8em;">^k</span>&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--dtaupe);"># false-positive rate</span>
+k* = (m/n)·ln2 <span class="c">≈ 0.693·(m/n)</span>&nbsp;&nbsp;<span style="color:var(--dtaupe);"># optimal # of hashes</span>
+with optimal k:&nbsp;&nbsp;p = (1/2)<span style="font-size:.8em;">^k</span> = 2<span style="font-size:.8em;">^(−k)</span>
+m = −n·ln p / (ln2)²&nbsp;&nbsp;<span style="color:var(--dtaupe);"># bits for a target p</span>
+      </div>
+      <table>
+        <tr><th>target p</th><th>bits / item (m/n)</th><th>optimal k</th></tr>
+        <tr><td>10%</td><td>~4.8</td><td>3–4</td></tr>
+        <tr><td>1%</td><td>~9.6</td><td>7</td></tr>
+        <tr><td>0.1%</td><td>~14.4</td><td>10</td></tr>
+        <tr><td>0.01%</td><td>~19.2</td><td>13</td></tr>
+      </table>
+      <p class="body" style="margin:12px 0 0;"><b>Memorize:</b> ~<b>10 bits per item ≈ 1% false positives</b> with <b>k ≈ 7</b>, and ~half the bits end up set. <b>1 billion usernames at 1%</b> → ~<b>1.2 GB</b> in RAM (vs ~15 GB to store the names). Size depends on <b>n and p only</b> — <b>not</b> on how long each item is.</p>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:12px;">Where it's used (and the catch)</div>
+      <p class="body" style="margin:0 0 12px;"><b>#1 use — LSM databases</b> (Cassandra, HBase, Bigtable, RocksDB): a Bloom filter <b>per SSTable</b> answers “could this key be in this file?” so reads skip disk files that definitely don't contain the key. Also: <b>CDNs</b> (Akamai skips caching one-hit-wonders), <b>Postgres</b> <span class="ic">bloom</span> index, early <b>Chrome</b> Safe Browsing, <b>Medium</b> (don't re-recommend read articles), <b>distributed caches</b> (skip the RPC).</p>
+      <p class="body" style="margin:0;"><b>Can't delete</b> (clearing shared bits would create false negatives) → use a <b>counting Bloom filter</b> or a <b>cuckoo filter</b> (which also supports delete + better cache locality). <b>Don't use</b> when you need exact membership, retrieval, or when a false positive is unsafe.</p>
+    </div>
+  </div>
+
+  <h2 style="margin:34px 0 4px;">Interview Q&amp;A</h2>
+  <p class="lead" style="font-size:16px;margin:0 0 18px;">Tap a question. From fundamentals to the tricky follow-ups.</p>
+
+  <div class="sec">Fundamentals</div>
+  <div class="qa">
+    <details open><summary>What is a Bloom filter in one sentence?</summary><div class="a">A space-efficient <b>probabilistic set</b> that tests membership, answering <b>“definitely not in the set”</b> or <b>“possibly in the set”</b> — with possible false positives but <b>no false negatives</b>.</div></details>
+    <details><summary>Does it store the actual items?</summary><div class="a">No — only a <b>bit array</b>. Items are never kept, so you can't list or retrieve them, and the size is <b>independent of item length</b>.</div></details>
+    <details><summary>Why no false negatives, but false positives are possible?</summary><div class="a">Adding an item <b>sets</b> its k bits to 1, and bits only go 0→1 (never back). So a real member's k bits are always 1 → never “definitely not.” A <b>false positive</b> happens when a non-member's k bits were all coincidentally set by <b>other</b> items.</div></details>
+    <details><summary>What are the three parameters and how do they relate?</summary><div class="a"><span class="ic">m</span> (bits), <span class="ic">n</span> (items), <span class="ic">k</span> (hashes). Optimal <span class="ic">k = (m/n)·ln2</span>, giving <span class="ic">p = 2^(−k)</span> and <span class="ic">m = −n·ln p / (ln2)²</span>.</div></details>
+  </div>
+
+  <div class="sec">Mechanics &amp; math</div>
+  <div class="qa">
+    <details><summary>If I add more hash functions, does accuracy always improve?</summary><div class="a">No — there's a sweet spot. Too few hashes under-discriminate; too many fill the array with 1s too fast, <b>raising</b> false positives. Optimum <span class="ic">k = (m/n)·ln2</span> sets ~half the bits to 1.</div></details>
+    <details><summary>How much memory for 1B items at 1% FP?</summary><div class="a">~9.6 bits/item → <b>~1.2 GB</b>, <span class="ic">k ≈ 7</span>. Rule of thumb: <b>~10 bits/item ≈ 1% FP</b>.</div></details>
+    <details><summary>My false-positive rate is too high in production — which knobs?</summary><div class="a">Increase <span class="ic">m</span> (more bits) — the primary lever — and re-tune <span class="ic">k</span> to <span class="ic">(m/n)·ln2</span>. If <span class="ic">n</span> grew beyond plan the filter is over-full → <b>rebuild larger</b> or switch to a <b>scalable Bloom filter</b>. You can't lower FP by deleting (you can't delete).</div></details>
+    <details><summary>What happens as the filter saturates?</summary><div class="a">Bits approach all-1s, so almost every query returns “maybe” and the FP rate → ~1. The filter becomes useless — rebuild it larger.</div></details>
+  </div>
+
+  <div class="sec">Operations &amp; limits</div>
+  <div class="qa">
+    <details><summary>Why can't a standard Bloom filter delete?</summary><div class="a">Clearing an item's bits might clear bits <b>shared</b> with other present items, creating <b>false negatives</b> and breaking the core guarantee.</div></details>
+    <details><summary>How do you support deletion then?</summary><div class="a"><b>Counting Bloom filter</b> (per-slot counters: increment on add, decrement on delete; ~4× space, watch overflow) or a <b>cuckoo filter</b> (stores fingerprints, supports delete). Or periodically rebuild.</div></details>
+    <details><summary>Can two Bloom filters be merged?</summary><div class="a">Yes — same <span class="ic">m</span> and hash functions → the <b>union</b> is a bitwise <b>OR</b>. Great for combining per-shard filters. (Intersection via AND is <b>not</b> exact.)</div></details>
+    <details><summary>Are they concurrency-friendly?</summary><div class="a">Reads are naturally concurrent. Inserts only flip bits 0→1, so concurrent inserts are safe without locks in most memory models. Counting filters need atomic counter updates.</div></details>
+  </div>
+
+  <div class="sec">Variants &amp; alternatives</div>
+  <div class="qa">
+    <details><summary>Bloom filter vs hash set — when each?</summary><div class="a">Hash set = exact membership + retrieval, but O(item-size) space and must hold the keys. Bloom = probabilistic, no retrieval, a <b>fraction</b> of the space. Use Bloom as a <b>front-line filter</b> before an exact structure.</div></details>
+    <details><summary>Bloom vs Cuckoo filter?</summary><div class="a">Cuckoo <b>supports deletion</b>, has <b>better cache locality</b>, and is often <b>smaller</b> below ~3% FP. Bloom is simpler with no “insertion can fail” case. Cuckoo is the usual <b>“what if you need deletes?”</b> answer.</div></details>
+    <details><summary>Bloom filter vs HyperLogLog?</summary><div class="a">Different jobs. Bloom = <b>membership</b> (“is X in the set?”). HyperLogLog = <b>cardinality</b> (“how many distinct?”). Don't mix them up.</div></details>
+  </div>
+
+  <div class="sec">Systems &amp; design</div>
+  <div class="qa">
+    <details><summary>Where does a Bloom filter appear in Cassandra / RocksDB?</summary><div class="a">Per <b>SSTable</b>: before reading a file from disk for a key, check that SSTable's Bloom filter. “Definitely not” → skip the disk read. Makes point reads for non-existent keys cheap — the classic LSM-tree optimization.</div></details>
+    <details><summary>Design: username availability at scale.</summary><div class="a">In-RAM Bloom filter of all taken names (sized for <span class="ic">n</span>, <span class="ic">p=1%</span>). Per keystroke, query it: “definitely not” → available instantly, no DB; “maybe” → one indexed DB lookup to confirm (covers the ~1% FPs). Append on new signups; use a counting filter or periodic rebuild if names get freed.</div></details>
+    <details><summary>A false positive caused an extra DB read — is that a bug?</summary><div class="a">No — expected by design. You pick the direction so a false positive is merely <b>extra work</b>, not a <b>wrong answer</b>; the confirming lookup makes the end-to-end result correct.</div></details>
+    <details><summary>How do you get k independent hashes cheaply?</summary><div class="a"><b>Double hashing</b> (Kirsch–Mitzenmacher): derive all k from two base hashes — <span class="ic">h_i = h1 + i·h2 mod m</span> — same FP rate, far cheaper than k real hash functions. Cryptographic hashes are unnecessary here.</div></details>
+  </div>
+
+  <div class="sec">Tricky follow-ups</div>
+  <div class="qa">
+    <details><summary>Can a Bloom filter ever say “definitely yes”?</summary><div class="a">No. Its two answers are “definitely no” and “maybe.” Certainty of <b>presence</b> always needs the backing store.</div></details>
+    <details><summary>If I query an item I just added, can it return “not present”?</summary><div class="a">Never — that would be a false negative, which is impossible. Just-added items always read “maybe.”</div></details>
+    <details><summary>Is the false-positive rate per-query or global?</summary><div class="a">Per query of a <b>non-member</b>. It doesn't “run out” — each independent non-member query has ≈ <span class="ic">p</span> chance. It rises as the filter fills.</div></details>
+    <details><summary>Why did Bitcoin drop BIP37 Bloom filters?</summary><div class="a"><b>Privacy.</b> The items you query leak what you care about; a shared filter reveals a fingerprint of your data. Bloom filters are <b>not</b> a privacy or security mechanism.</div></details>
+  </div>
+
+  <div class="card" style="background:var(--dbg);border-color:var(--dhair);box-shadow:var(--shadowd);padding:26px 30px;margin:26px 0 22px;">
+    <div class="grain" style="mix-blend-mode:screen;opacity:.06;"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--dtaupe);margin-bottom:14px;">Say this in the interview</div>
+      <ul class="lines">
+        <li><span class="b">▸</span><span>“It answers <b>‘definitely not’</b> or <b>‘maybe’</b> — false positives yes, false negatives <b>never</b>.”</span></li>
+        <li><span class="b">▸</span><span>“It stores <b>bits, not items</b>, so size depends on <b>n and p</b>, not item length — ~<b>10 bits/item for 1%</b>.”</span></li>
+        <li><span class="b">▸</span><span>“Use it as a <b>cheap local ‘probably not’</b> to skip an expensive disk/DB/network op in the common case.”</span></li>
+        <li><span class="b">▸</span><span>“Can't delete → <b>counting Bloom</b> or <b>cuckoo filter</b>. Classic use: <b>per-SSTable</b> in LSM databases.”</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;padding:4px 4px 0;">
+    <div class="lead" style="font-size:16px;">Reel: <b style="font-style:normal;">Bloom Filters</b> · Episode #11 &nbsp;→&nbsp; Next: <b style="font-style:normal;">Write-Ahead Log</b></div>
+    <div class="mono" style="font-size:12px;color:var(--taupe);">Follow @systemsketch · one concept, sketched</div>
+  </div>
+
+</div>
+</body>
+</html>

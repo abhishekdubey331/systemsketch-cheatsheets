@@ -3,19 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Consistency — the cheat sheet</title>
+<title>SystemSketch — Cheat Sheets</title>
+<meta name="description" content="One system-design concept, sketched. Interview-ready cheat sheets: Bloom filters, consistency, and more.">
 <style>
   :root{
     --paper:#F0EEE6; --ink:#141413; --manilla:#F5E3C7; --tint:#F2ECE0;
     --taupe:#8A8172; --kraft:#B8A98C; --hair:rgba(20,20,19,.14);
     --clay:#CC785C; --clay-line:#D97757;
-    --dbg:#1A1915; --dtext:#E8E4D8; --dhair:rgba(232,228,216,.16); --dtaupe:#9C927E;
     --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
     --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
     --chip:inset 0 1px 0 rgba(255,255,255,.7),0 1px 1px rgba(20,20,19,.04),0 5px 12px rgba(20,20,19,.08);
     --shadow:0 1px 1px rgba(20,20,19,.04),0 6px 14px rgba(20,20,19,.08),0 18px 40px rgba(20,20,19,.06);
-    --shadowd:0 1px 1px rgba(0,0,0,.3),0 8px 20px rgba(0,0,0,.4),0 24px 50px rgba(0,0,0,.35);
   }
   *{box-sizing:border-box;}
   body{margin:0;background:#E5E0D3;color:var(--ink);font-family:var(--sans);
@@ -23,108 +22,72 @@
   .wrap{max-width:900px;margin:0 auto;padding:56px 24px 90px;}
   .grain{position:absolute;inset:0;pointer-events:none;opacity:.05;mix-blend-mode:multiply;
          background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
-  .card{position:relative;border:1px solid var(--hair);background:var(--paper);border-radius:14px;
-        box-shadow:var(--shadow);overflow:hidden;}
-  .in{position:relative;}
+  a{color:var(--clay);text-decoration:none;}
   .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--taupe);}
-  .eyebrow{font-weight:700;font-size:12px;letter-spacing:.15em;text-transform:uppercase;}
   .lead{font-family:var(--serif);font-style:italic;color:#403d37;}
   .mono{font-family:var(--mono);}
-  .clay{color:var(--clay);}
-  h1{font-family:var(--serif);font-weight:600;font-size:54px;line-height:1.02;letter-spacing:-.02em;margin:20px 0 0;}
-  .u{position:relative;white-space:nowrap;}
-  .u svg{position:absolute;left:-2%;bottom:-9px;width:104%;height:12px;overflow:visible;}
-  .two{display:flex;flex-wrap:wrap;gap:22px;margin-bottom:22px;}
-  .two .card{flex:1 1 300px;}
-  .row{font-family:var(--mono);font-size:12.5px;line-height:2;color:#4a463f;}
-  .row b{color:var(--taupe);font-weight:400;}
-  ul.lines{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;}
-  ul.lines li{display:flex;gap:11px;font-size:15px;line-height:1.55;color:var(--dtext);}
-  ul.lines .b{font-family:var(--serif);font-weight:700;color:var(--clay);}
-  @media (max-width:520px){h1{font-size:40px;}}
+  h1{font-family:var(--serif);font-weight:600;font-size:64px;line-height:1;letter-spacing:-.025em;margin:20px 0 0;}
+  h1 .clay{color:var(--clay);}
+  .sublabel{font-weight:700;font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--taupe);
+            margin:48px 0 16px;display:flex;align-items:center;gap:12px;}
+  .sublabel::after{content:"";flex:1;height:1px;background:var(--hair);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:18px;}
+  .card{position:relative;display:block;border:1px solid var(--hair);background:var(--paper);border-radius:16px;
+        padding:24px 24px 22px;box-shadow:var(--chip);overflow:hidden;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease;}
+  .card:hover{transform:translateY(-3px);box-shadow:var(--shadow);border-color:var(--kraft);}
+  .card .day{font-family:var(--mono);font-size:11.5px;letter-spacing:.12em;color:var(--taupe);}
+  .card h3{font-family:var(--serif);font-weight:600;font-size:28px;letter-spacing:-.02em;margin:8px 0 8px;color:var(--ink);}
+  .card p{margin:0;font-size:14.5px;line-height:1.55;color:#5a554b;}
+  .card .go{margin-top:16px;font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--clay);}
+  .card.soon{opacity:.6;}
+  .card.soon:hover{transform:none;box-shadow:var(--chip);border-color:var(--hair);}
+  .card.soon .go{color:var(--taupe);}
+  .foot{margin-top:56px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;
+        border-top:1px solid var(--hair);padding-top:24px;}
+  @media (max-width:520px){h1{font-size:46px;}}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <header class="card" style="padding:38px 34px;margin-bottom:22px;">
-    <div class="grain"></div>
-    <div class="in">
-      <span class="kicker" style="display:inline-block;border:1px solid var(--hair);background:var(--tint);padding:6px 11px;border-radius:4px;">30-Day System Design · Day 7</span>
-      <h1>Consistency <span style="color:var(--taupe);font-weight:400;">— the cheat sheet</span></h1>
-      <p class="lead" style="font-size:20px;margin:14px 0 0;max-width:640px;">Strong vs Eventual: why your like count can read <span class="clay">1,000</span> for you and <span class="clay">999</span> for your friend — and when that's fine.</p>
-    </div>
+  <header style="position:relative;">
+    <span class="kicker" style="display:inline-block;border:1px solid var(--hair);background:var(--tint);padding:6px 11px;border-radius:4px;">30-Day System Design Challenge</span>
+    <h1>System<span class="clay">Sketch</span><br>Cheat Sheets</h1>
+    <p class="lead" style="font-size:21px;margin:18px 0 0;max-width:600px;">One backend concept, sketched — the interview-ready version. What FAANG rounds actually ask, on one page each.</p>
   </header>
 
-  <div class="card" style="background:var(--manilla);padding:24px 30px;margin-bottom:22px;">
-    <div class="grain"></div>
-    <div class="in">
-      <div class="eyebrow" style="color:#8a6d4e;margin-bottom:8px;">The one idea</div>
-      <div style="font-family:var(--serif);font-weight:600;font-size:26px;line-height:1.28;">Consistency = do all the copies of your data show the <span class="u">same value<svg viewBox="0 0 160 16"><path d="M4 9 C 46 3, 118 13, 156 5" fill="none" stroke="#D97757" stroke-width="4" stroke-linecap="round"/></svg></span> right now?</div>
-    </div>
-  </div>
+  <div class="sublabel">Cheat sheets</div>
+  <div class="grid">
 
-  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
-    <div class="grain"></div>
-    <div class="in">
-      <div class="eyebrow" style="color:var(--taupe);margin-bottom:10px;">The mental model</div>
-      <p style="font-size:16px;line-height:1.7;color:#2c2a26;margin:0;">You tap <b>like</b>. That write lands on <b>one copy</b> of the data first — a viral post is served from <b>many copies</b>. For a moment, the others haven't caught up: you see <b class="mono">1,000</b>, your friend refreshes a lagging copy and sees <b class="mono">999</b>. Same post, two numbers. <b>It's not a bug — it's a choice.</b></p>
-    </div>
-  </div>
-
-  <div class="two">
-    <div class="card" style="padding:24px 26px;">
+    <a class="card" href="./bloom-filters.html">
       <div class="grain"></div>
-      <div class="in">
-        <div class="eyebrow" style="color:#8a6d4e;margin-bottom:12px;">Eventual consistency</div>
-        <p style="font-size:15px;line-height:1.6;margin:0 0 14px;color:#2c2a26;">Copies sync a moment later. Answers are <b>instant</b> — but can be <b>briefly wrong</b>.</p>
-        <div class="row">
-          <div><b>feels →</b> fast</div>
-          <div><b>risk&nbsp;&nbsp;→</b> stale for a second</div>
-          <div><b>use&nbsp;&nbsp;&nbsp;→</b> likes · views · feeds · counts</div>
-          <div><b>real&nbsp;&nbsp;→</b> Instagram likes, DNS</div>
-        </div>
-      </div>
-    </div>
-    <div class="card" style="padding:24px 26px;">
+      <div class="day">Day 11 · Bloom Filters</div>
+      <h3>Bloom Filters</h3>
+      <p>Check “is this username taken?” against a billion names in an instant — with a tiny row of bits, not the database. The false-positive math + 20 interview Q&amp;A.</p>
+      <div class="go">Read →</div>
+    </a>
+
+    <a class="card" href="./consistency.html">
       <div class="grain"></div>
-      <div class="in">
-        <div class="eyebrow" style="color:#8a6d4e;margin-bottom:12px;">Strong consistency</div>
-        <p style="font-size:15px;line-height:1.6;margin:0 0 14px;color:#2c2a26;">Every copy agrees <b>before</b> the write returns. Always <b>right</b> — but you <b>wait</b>.</p>
-        <div class="row">
-          <div><b>feels →</b> correct</div>
-          <div><b>cost&nbsp;&nbsp;→</b> added latency</div>
-          <div><b>use&nbsp;&nbsp;&nbsp;→</b> money · inventory · bookings</div>
-          <div><b>real&nbsp;&nbsp;→</b> bank balance, payments</div>
-        </div>
-      </div>
+      <div class="day">Day 7 · Consistency</div>
+      <h3>Consistency</h3>
+      <p>Strong vs eventual: why your like count reads 1,000 for you and 999 for a friend — and when that's perfectly fine.</p>
+      <div class="go">Read →</div>
+    </a>
+
+    <div class="card soon">
+      <div class="grain"></div>
+      <div class="day">Day 12 · Coming soon</div>
+      <h3>Write-Ahead Log</h3>
+      <p>How databases survive a crash mid-write — the durability trick behind every reliable commit.</p>
+      <div class="go">Coming soon</div>
     </div>
+
   </div>
 
-  <div class="card" style="padding:24px 30px;margin-bottom:22px;border:1.5px solid var(--clay);box-shadow:var(--chip),0 0 0 4px rgba(204,120,92,.10);">
-    <div class="grain"></div>
-    <div class="in">
-      <div class="eyebrow clay" style="margin-bottom:8px;">The decision rule</div>
-      <div style="font-family:var(--serif);font-weight:600;font-size:24px;line-height:1.32;">Choose <span class="clay">per feature</span>, not per app. A like can be eventual. A bank balance <b>can't</b>.</div>
-    </div>
-  </div>
-
-  <div class="card" style="background:var(--dbg);border-color:var(--dhair);box-shadow:var(--shadowd);padding:26px 30px;margin-bottom:22px;">
-    <div class="grain" style="mix-blend-mode:screen;opacity:.06;"></div>
-    <div class="in">
-      <div class="eyebrow" style="color:var(--dtaupe);margin-bottom:14px;">Say this in the interview</div>
-      <ul class="lines">
-        <li><span class="b">▸</span><span>“Eventual consistency trades <b>correct-now</b> for <b>speed and availability</b>.”</span></li>
-        <li><span class="b">▸</span><span>“This is <b>CAP's C-vs-A tradeoff</b> made concrete.”</span></li>
-        <li><span class="b">▸</span><span>“Strong consistency usually needs a <b>quorum / consensus</b> — that's where the latency comes from.”</span></li>
-        <li><span class="b">▸</span><span>“Default to <b>eventual</b>; reach for <b>strong</b> only where being wrong for a second is unacceptable — money, inventory, uniqueness.”</span></li>
-      </ul>
-    </div>
-  </div>
-
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;padding:4px 4px 0;">
-    <div class="lead" style="font-size:16px;">Reel: <b style="font-style:normal;">Consistency</b> · Episode #7 &nbsp;→&nbsp; Next: <b style="font-style:normal;">Rate Limiting</b></div>
-    <div class="mono" style="font-size:12px;color:var(--taupe);">Follow @systemsketch · one concept, sketched · Tue &amp; Fri</div>
+  <div class="foot">
+    <div class="lead" style="font-size:16px;">New sheet every episode.</div>
+    <div class="mono" style="font-size:12px;color:var(--taupe);">Follow @systemsketch · one concept, sketched</div>
   </div>
 
 </div>
