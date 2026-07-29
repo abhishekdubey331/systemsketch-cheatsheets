@@ -77,7 +77,33 @@
   .qa .a code, .ic{font-family:var(--mono);font-size:.87em;background:var(--tint);border:1px solid rgba(20,20,19,.07);border-radius:5px;padding:1px 5px;color:#7a4634;}
   .sec{font-weight:700;font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--taupe);margin:24px 0 10px;}
   p.body{font-size:16px;line-height:1.7;color:#2c2a26;}
-  @media (max-width:520px){h1{font-size:40px;}.bit{width:33px;height:44px;font-size:16px;}}
+  /* ---- narrow screens (this page gets read on a phone / screenshotted) ---- */
+  @media (max-width:560px){
+    h1{font-size:40px;}
+    .wrap{padding:22px 16px 70px;}
+    .bit{width:33px;height:44px;font-size:16px;}
+    /* the swoosh needs one unbroken line; below this width the phrase must wrap,
+       so swap the SVG for a highlighter rule that follows the text instead. */
+    .u{white-space:normal;background:linear-gradient(transparent 63%,rgba(217,119,87,.34) 63%,rgba(217,119,87,.34) 90%,transparent 90%);}
+    .u svg{display:none;}
+    /* card padding is set inline on each card, so it needs !important here;
+       reclaiming 24px of width is what lets the code block fit un-clipped */
+    .card{padding-left:18px !important;padding-right:18px !important;}
+    .fx{font-size:11.5px;padding:13px 14px;}
+    .qa .a{padding:13px 18px 16px;}
+    .qa summary{font-size:15px;padding:14px 16px;}
+    /* stack the table into per-row cards — otherwise the last column sits off
+       screen entirely, and a horizontal scrollbar is invisible in a screenshot */
+    table,tbody,tr,td{display:block;width:100%;}
+    thead{display:none;}
+    table{margin:14px 0 4px;}
+    tr{border:1px solid var(--hair);border-radius:10px;margin:0 0 10px;background:var(--paper);overflow:hidden;}
+    tr:nth-child(even) td{background:transparent;}
+    td{border-top:none;padding:8px 13px;overflow-wrap:anywhere;}
+    td:first-child{background:var(--tint);font-weight:600;border-bottom:1px solid var(--hair);}
+    td[data-l]::before{content:attr(data-l);display:block;font-family:var(--sans);font-size:10px;
+      font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--taupe);margin-bottom:3px;}
+  }
 </style>
 </head>
 <body>
@@ -183,11 +209,12 @@ with optimal k:&nbsp;&nbsp;p = (1/2)<span style="font-size:.8em;">^k</span> = 2<
 m = −n·ln p / (ln2)²&nbsp;&nbsp;<span style="color:var(--dtaupe);"># bits for a target p</span>
       </div>
       <table>
-        <tr><th>target p</th><th>bits / item (m/n)</th><th>optimal k</th></tr>
-        <tr><td>10%</td><td>~4.8</td><td>3–4</td></tr>
-        <tr><td>1%</td><td>~9.6</td><td>7</td></tr>
-        <tr><td>0.1%</td><td>~14.4</td><td>10</td></tr>
-        <tr><td>0.01%</td><td>~19.2</td><td>13</td></tr>
+        <thead><tr><th>target p</th><th>bits / item (m/n)</th><th>optimal k</th></tr></thead><tbody>
+        <tr><td>10%</td><td data-l="bits / item (m/n)">~4.8</td><td data-l="optimal k">3–4</td></tr>
+        <tr><td>1%</td><td data-l="bits / item (m/n)">~9.6</td><td data-l="optimal k">7</td></tr>
+        <tr><td>0.1%</td><td data-l="bits / item (m/n)">~14.4</td><td data-l="optimal k">10</td></tr>
+        <tr><td>0.01%</td><td data-l="bits / item (m/n)">~19.2</td><td data-l="optimal k">13</td></tr>
+        </tbody>
       </table>
       <p class="body" style="margin:12px 0 0;"><b>Memorize:</b> ~<b>10 bits per item ≈ 1% false positives</b> with <b>k ≈ 7</b>, and ~half the bits end up set. <b>1 billion usernames at 1%</b> → ~<b>1.2 GB</b> in RAM (vs ~15 GB to store the names). Size depends on <b>n and p only</b> — <b>not</b> on how long each item is.</p>
     </div>

@@ -86,7 +86,34 @@
   .qa .a code, .ic{font-family:var(--mono);font-size:.87em;background:var(--tint);border:1px solid rgba(20,20,19,.07);border-radius:5px;padding:1px 5px;color:#7a4634;}
   .sec{font-weight:700;font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--taupe);margin:24px 0 10px;}
   p.body{font-size:16px;line-height:1.7;color:#2c2a26;}
-  @media (max-width:520px){h1{font-size:40px;}.rec{flex:1 1 100%;}}
+
+  /* ---- narrow screens (this page gets read on a phone / screenshotted) ---- */
+  @media (max-width:560px){
+    h1{font-size:40px;}
+    .wrap{padding:22px 16px 70px;}
+    .rec{flex:1 1 100%;}
+    /* the swoosh needs one unbroken line; below this width the phrase must wrap,
+       so swap the SVG for a highlighter rule that follows the text instead. */
+    .u{white-space:normal;background:linear-gradient(transparent 63%,rgba(217,119,87,.34) 63%,rgba(217,119,87,.34) 90%,transparent 90%);}
+    .u svg{display:none;}
+    /* card padding is set inline on each card, so it needs !important here;
+       reclaiming 24px of width is what lets the code block fit un-clipped */
+    .card{padding-left:18px !important;padding-right:18px !important;}
+    .fx{font-size:11.5px;padding:13px 14px;}
+    .qa .a{padding:13px 18px 16px;}
+    .qa summary{font-size:15px;padding:14px 16px;}
+    /* stack the table into per-row cards — otherwise the last column sits off
+       screen entirely, and a horizontal scrollbar is invisible in a screenshot */
+    table,tbody,tr,td{display:block;width:100%;}
+    thead{display:none;}
+    table{margin:14px 0 4px;}
+    tr{border:1px solid var(--hair);border-radius:10px;margin:0 0 10px;background:var(--paper);overflow:hidden;}
+    tr:nth-child(even) td{background:transparent;}
+    td{border-top:none;padding:8px 13px;overflow-wrap:anywhere;}
+    td:first-child{background:var(--tint);font-weight:600;border-bottom:1px solid var(--hair);}
+    td[data-l]::before{content:attr(data-l);display:block;font-family:var(--sans);font-size:10px;
+      font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--taupe);margin-bottom:3px;}
+  }
 </style>
 </head>
 <body>
@@ -215,20 +242,22 @@
     <div class="in">
       <div class="eyebrow" style="color:var(--taupe);margin-bottom:12px;">The dial — durability vs throughput</div>
       <p class="body" style="margin:0 0 4px;">Every database exposes the same knob: <b>how often do we <span class="ic">fsync</span> the log?</b></p>
-      <div class="fx"><span class="c">write()</span> → OS page cache   <span class="m"># fast (µs) · lost on power cut</span>
-<span class="c">fsync()</span> → storage device  <span class="m"># slow (ms) · survives power cut</span>
+      <div class="fx"><span class="c">write()</span> → OS page cache  <span class="m"># lost on power cut</span>
+<span class="c">fsync()</span> → the device     <span class="m"># survives it</span>
           <span class="m">~0.1–1 ms SSD · ~5–10 ms HDD</span>
 
-<span class="g">group commit:</span> N txns share ONE fsync → cost/txn ÷ N</div>
+<span class="g">group commit:</span> N txns share ONE fsync</div>
       <table>
-        <tr><th>Engine</th><th>Setting</th><th>Durability on power loss</th></tr>
-        <tr><td>PostgreSQL</td><td><span class="ic">synchronous_commit = on</span></td><td>Full — default</td></tr>
-        <tr><td>PostgreSQL</td><td><span class="ic">= off</span></td><td>May lose recent commits · <b>never corrupt</b></td></tr>
-        <tr><td>MySQL / InnoDB</td><td><span class="ic">innodb_flush_log_at_trx_commit = 1</span></td><td>Full — ACID default</td></tr>
-        <tr><td>MySQL / InnoDB</td><td><span class="ic">= 2</span></td><td>Survives process crash, <b>not</b> power loss</td></tr>
-        <tr><td>MySQL / InnoDB</td><td><span class="ic">= 0</span></td><td>May lose ~1 s of commits</td></tr>
-        <tr><td>SQLite (WAL mode)</td><td><span class="ic">synchronous = FULL</span></td><td>Full</td></tr>
-        <tr><td>SQLite (WAL mode)</td><td><span class="ic">= NORMAL</span></td><td>May lose recent commits · not corrupt</td></tr>
+        <thead><tr><th>Engine</th><th>Setting</th><th>Durability on power loss</th></tr></thead>
+        <tbody>
+        <tr><td>PostgreSQL</td><td data-l="Setting"><span class="ic">synchronous_commit = on</span></td><td data-l="Durability on power loss">Full — default</td></tr>
+        <tr><td>PostgreSQL</td><td data-l="Setting"><span class="ic">= off</span></td><td data-l="Durability on power loss">May lose recent commits · <b>never corrupt</b></td></tr>
+        <tr><td>MySQL / InnoDB</td><td data-l="Setting"><span class="ic">innodb_flush_log_at_trx_commit = 1</span></td><td data-l="Durability on power loss">Full — ACID default</td></tr>
+        <tr><td>MySQL / InnoDB</td><td data-l="Setting"><span class="ic">= 2</span></td><td data-l="Durability on power loss">Survives process crash, <b>not</b> power loss</td></tr>
+        <tr><td>MySQL / InnoDB</td><td data-l="Setting"><span class="ic">= 0</span></td><td data-l="Durability on power loss">May lose ~1 s of commits</td></tr>
+        <tr><td>SQLite (WAL mode)</td><td data-l="Setting"><span class="ic">synchronous = FULL</span></td><td data-l="Durability on power loss">Full</td></tr>
+        <tr><td>SQLite (WAL mode)</td><td data-l="Setting"><span class="ic">= NORMAL</span></td><td data-l="Durability on power loss">May lose recent commits · not corrupt</td></tr>
+        </tbody>
       </table>
       <p class="body" style="margin:12px 0 0;"><b>Memorize the trade:</b> relaxing the flush loses <b>recent commits</b>, never <b>consistency</b> — the DB still comes back intact, just slightly in the past. That's why <span class="ic">synchronous_commit=off</span> is a legitimate production choice and <b>turning off the WAL is not</b>.</p>
     </div>
