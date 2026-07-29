@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Write-Ahead Log — the cheat sheet</title>
+<meta name="description" content="How databases survive a crash mid-write — the write-ahead rule, fsync and what 'committed' really means, crash recovery by replay, and 25 interview Q&A. SystemSketch cheat sheet, Day 12.">
+<style>
+  :root{
+    --paper:#F0EEE6; --ink:#141413; --manilla:#F5E3C7; --tint:#F2ECE0;
+    --taupe:#8A8172; --kraft:#B8A98C; --hair:rgba(20,20,19,.14); --green:#3F7A4F;
+    --clay:#CC785C; --clay-line:#D97757; --red:#B24438;
+    --dbg:#1A1915; --dtext:#E8E4D8; --dhair:rgba(232,228,216,.16); --dtaupe:#9C927E;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --chip:inset 0 1px 0 rgba(255,255,255,.7),0 1px 1px rgba(20,20,19,.04),0 5px 12px rgba(20,20,19,.08);
+    --shadow:0 1px 1px rgba(20,20,19,.04),0 6px 14px rgba(20,20,19,.08),0 18px 40px rgba(20,20,19,.06);
+    --shadowd:0 1px 1px rgba(0,0,0,.3),0 8px 20px rgba(0,0,0,.4),0 24px 50px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:#E5E0D3;color:var(--ink);font-family:var(--sans);
+       -webkit-font-smoothing:antialiased;line-height:1.5;}
+  .wrap{max-width:900px;margin:0 auto;padding:34px 24px 90px;}
+  .grain{position:absolute;inset:0;pointer-events:none;opacity:.05;mix-blend-mode:multiply;
+         background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+  a{color:var(--clay);text-decoration:none;} a:hover{color:var(--clay-line);}
+  .card{position:relative;border:1px solid var(--hair);background:var(--paper);border-radius:14px;
+        box-shadow:var(--shadow);overflow:hidden;}
+  .in{position:relative;}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--taupe);}
+  .eyebrow{font-weight:700;font-size:12px;letter-spacing:.15em;text-transform:uppercase;}
+  .lead{font-family:var(--serif);font-style:italic;color:#403d37;}
+  .mono{font-family:var(--mono);}
+  .clay{color:var(--clay);} .green{color:var(--green);} .red{color:var(--red);}
+  h1{font-family:var(--serif);font-weight:600;font-size:54px;line-height:1.02;letter-spacing:-.02em;margin:20px 0 0;}
+  h2{font-family:var(--serif);font-weight:600;font-size:30px;letter-spacing:-.02em;margin:0 0 4px;}
+  .u{position:relative;white-space:nowrap;}
+  .u svg{position:absolute;left:-2%;bottom:-9px;width:104%;height:12px;overflow:visible;}
+  .two{display:flex;flex-wrap:wrap;gap:22px;margin-bottom:22px;}
+  .two .card{flex:1 1 300px;}
+  .row{font-family:var(--mono);font-size:12.5px;line-height:2;color:#4a463f;}
+  .row b{color:var(--taupe);font-weight:400;}
+  ul.lines{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;}
+  ul.lines li{display:flex;gap:11px;font-size:15px;line-height:1.55;color:var(--dtext);}
+  ul.lines .b{font-family:var(--serif);font-weight:700;color:var(--clay);}
+  .nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+  .backlink{font-size:14px;font-weight:600;color:var(--taupe);}
+  .backlink:hover{color:var(--clay);}
+  /* WAL records + steps */
+  .wal{display:flex;gap:9px;flex-wrap:wrap;margin:4px 0 2px;}
+  .rec{flex:1 1 190px;border:1.5px solid var(--hair);background:var(--tint);border-radius:9px;padding:11px 13px;
+       font-family:var(--mono);font-size:12.5px;line-height:1.5;color:var(--kraft);box-shadow:var(--chip);}
+  .rec b{display:block;color:var(--taupe);font-weight:400;font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:3px;}
+  .rec.on{background:var(--manilla);border-color:var(--clay);color:var(--clay);box-shadow:var(--chip),0 0 0 3px rgba(204,120,92,.13);}
+  .rec.on b{color:#8a6d4e;}
+  .rec.ok{border-color:var(--green);color:var(--green);background:rgba(63,122,79,.05);box-shadow:var(--chip),0 0 0 3px rgba(63,122,79,.14);}
+  .rec.ok b{color:var(--green);}
+  .rec.off{border-style:dashed;background:transparent;box-shadow:none;color:var(--kraft);}
+  .step{display:flex;gap:13px;align-items:flex-start;margin:18px 0 0;}
+  .step:first-of-type{margin-top:4px;}
+  .num{flex:0 0 25px;height:25px;border-radius:50%;background:var(--ink);color:var(--paper);font-family:var(--mono);
+       font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:3px;}
+  .step .t{flex:1;min-width:0;}
+  .caption{text-align:center;font-family:var(--mono);font-size:12px;color:var(--taupe);margin:10px 0 2px;}
+  /* code block */
+  .fx{font-family:var(--mono);font-size:14px;background:var(--dbg);color:var(--dtext);border-radius:12px;
+      padding:16px 20px;margin:12px 0;overflow-x:auto;box-shadow:var(--shadowd);line-height:1.9;
+      white-space:pre;}
+  .fx .c{color:var(--clay-line);} .fx .g{color:#7FB08C;} .fx .m{color:var(--dtaupe);}
+  table{width:100%;border-collapse:collapse;margin:14px 0 4px;font-family:var(--mono);font-size:13px;}
+  th{background:var(--ink);color:var(--paper);text-align:left;padding:9px 12px;font-weight:600;letter-spacing:.02em;}
+  td{padding:9px 12px;border-top:1px solid var(--hair);color:#3a372f;vertical-align:top;}
+  tr:nth-child(even) td{background:var(--tint);}
+  /* Q&A */
+  .qa{display:flex;flex-direction:column;gap:10px;}
+  .qa details{border:1px solid var(--hair);border-radius:12px;background:var(--paper);overflow:hidden;box-shadow:var(--chip);}
+  .qa summary{cursor:pointer;list-style:none;padding:15px 20px;font-weight:600;font-size:16px;color:var(--ink);
+              display:flex;gap:12px;align-items:baseline;}
+  .qa summary::-webkit-details-marker{display:none;}
+  .qa summary::before{content:"Q";font-family:var(--serif);font-weight:700;color:var(--clay);font-size:18px;}
+  .qa summary::after{content:"+";margin-left:auto;color:var(--kraft);font-family:var(--mono);font-size:20px;}
+  .qa details[open] summary::after{content:"–";}
+  .qa details[open] summary{border-bottom:1px solid var(--hair);}
+  .qa .a{padding:14px 20px 18px 46px;color:#2c2a26;font-size:15px;line-height:1.65;}
+  .qa .a code, .ic{font-family:var(--mono);font-size:.87em;background:var(--tint);border:1px solid rgba(20,20,19,.07);border-radius:5px;padding:1px 5px;color:#7a4634;}
+  .sec{font-weight:700;font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--taupe);margin:24px 0 10px;}
+  p.body{font-size:16px;line-height:1.7;color:#2c2a26;}
+  @media (max-width:520px){h1{font-size:40px;}.rec{flex:1 1 100%;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="nav">
+    <a class="backlink" href="./">← all cheat sheets</a>
+    <span class="mono" style="font-size:12px;color:var(--taupe);">SystemSketch · Day 12</span>
+  </div>
+
+  <header class="card" style="padding:38px 34px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <span class="kicker" style="display:inline-block;border:1px solid var(--hair);background:var(--tint);padding:6px 11px;border-radius:4px;">30-Day System Design · Day 12</span>
+      <h1>Write-Ahead Log <span style="color:var(--taupe);font-weight:400;">— the cheat sheet</span></h1>
+      <p class="lead" style="font-size:20px;margin:14px 0 0;max-width:660px;">You type the perfect Instagram caption and the app crashes. You reopen it — <span class="clay">your draft is still there.</span> The durability trick behind every reliable commit.</p>
+    </div>
+  </header>
+
+  <div class="card" style="background:var(--manilla);padding:24px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:#8a6d4e;margin-bottom:8px;">The one idea</div>
+      <div style="font-family:var(--serif);font-weight:600;font-size:26px;line-height:1.3;"><span class="u">Write down what you're about to do<svg viewBox="0 0 160 16"><path d="M4 9 C 46 3, 118 13, 156 5" fill="none" stroke="#D97757" stroke-width="4" stroke-linecap="round"/></svg></span> — and get that note onto disk — <b>before</b> you do it. Recovery is just <b>replaying the notes</b>.</div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:10px;">The mental model</div>
+      <p class="body" style="margin:0;">Your app auto-saves the caption to a <b>local database</b> on the phone. Editing the database file <b>in place</b> is risky: a row can be half-written when the process dies, leaving the file <b>corrupt</b> — not just stale, but unreadable. So the database doesn't touch the data file first. It <b>appends the change to a log</b>, forces that log to storage, and only then treats the change as <b class="green">committed</b>. The data file catches up <b>later</b>, at its leisure. Crash? On restart, <b>replay the log</b> — the draft comes back. The log is the source of truth; the data file is a cache of it.</p>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:16px;">How it works — append, flush, then apply</div>
+
+      <div class="step">
+        <div class="num">1</div>
+        <div class="t">
+          <p class="body" style="margin:0 0 8px;"><b>Append</b> the change to the log. Sequential write, no seeking. The data file is <b>untouched</b>.</p>
+          <div class="wal">
+            <span class="rec on"><b>log · in buffer</b>LSN 41 · SET draft='6 months…'</span>
+            <span class="rec off"><b>data page 7</b>old value · unchanged</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">2</div>
+        <div class="t">
+          <p class="body" style="margin:0 0 8px;"><b><span class="ic">fsync()</span> the log</b> — this is the moment that matters. Only once the record is on <b>stable storage</b> is the change <b class="green">committed</b>, and only then do you acknowledge the user.</p>
+          <div class="wal">
+            <span class="rec ok"><b>log · on disk ✓</b>LSN 41 · committed</span>
+            <span class="rec off"><b>data page 7</b>still old · that's fine</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">3</div>
+        <div class="t">
+          <p class="body" style="margin:0 0 8px;"><b>Apply</b> to the data file whenever convenient — batched, in the background. <b>The log leads; the data catches up.</b></p>
+          <div class="wal">
+            <span class="rec ok"><b>log · on disk ✓</b>LSN 41</span>
+            <span class="rec on"><b>data page 7</b>pageLSN = 41 · applied</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">4</div>
+        <div class="t">
+          <p class="body" style="margin:0 0 8px;"><b class="red">Crash</b> between 2 and 3 → on restart, scan the log from the last checkpoint and <b>redo</b> every record whose <span class="ic">LSN &gt; pageLSN</span>. Committed work returns; half-finished work is rolled back.</p>
+          <div class="wal">
+            <span class="rec ok"><b>replay</b>LSN 41 &gt; pageLSN 40 → redo</span>
+            <span class="rec ok"><b>result</b>✓ your draft is back</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="body" style="margin:22px 0 0;"><b>The write-ahead rule</b> is literally the name: <b>the log record must be durable before the data page it describes is written.</b> Break that ordering and recovery can meet a data page it has no note for.</p>
+    </div>
+  </div>
+
+  <div class="two">
+    <div class="card" style="padding:24px 26px;">
+      <div class="grain"></div>
+      <div class="in">
+        <div class="eyebrow green" style="margin-bottom:12px;">“Committed”</div>
+        <p style="font-size:15px;line-height:1.6;margin:0 0 14px;color:#2c2a26;">The commit record reached <b>stable storage</b> (<span class="ic">fsync</span> returned). It survives process crash, OS panic <b>and</b> power loss.</p>
+        <div class="row">
+          <div><b>lives in →</b> the log, on disk</div>
+          <div><b>on crash →</b> redone during replay</div>
+          <div><b>safe to →</b> tell the user “saved”</div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="padding:24px 26px;">
+      <div class="grain"></div>
+      <div class="in">
+        <div class="eyebrow clay" style="margin-bottom:12px;">“Written” but not flushed</div>
+        <p style="font-size:15px;line-height:1.6;margin:0 0 14px;color:#2c2a26;"><span class="ic">write()</span> returned, but the bytes sit in the <b>OS page cache</b>. Survives a process crash — a <b class="red">power cut loses it</b>.</p>
+        <div class="row">
+          <div><b>lives in →</b> RAM (page cache)</div>
+          <div><b>on power cut →</b> gone, silently</div>
+          <div><b>never →</b> ack the user on this</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:24px 30px;margin-bottom:22px;border:1.5px solid var(--clay);box-shadow:var(--chip),0 0 0 4px rgba(204,120,92,.10);">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow clay" style="margin-bottom:8px;">The guarantee (and the catch)</div>
+      <div style="font-family:var(--serif);font-weight:600;font-size:24px;line-height:1.34;">A WAL buys you <span class="clay">atomicity + durability</span> — a write is all-or-nothing, and once acknowledged it survives a crash. But <b>only up to the last <span class="ic" style="font-size:.72em;">fsync</span></b>. <span class="ic" style="font-size:.72em;">write()</span> is not durability; if the log never truly hit the platter, the change is <b>gone</b>.</div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:12px;">The dial — durability vs throughput</div>
+      <p class="body" style="margin:0 0 4px;">Every database exposes the same knob: <b>how often do we <span class="ic">fsync</span> the log?</b></p>
+      <div class="fx"><span class="c">write()</span> → OS page cache   <span class="m"># fast (µs) · lost on power cut</span>
+<span class="c">fsync()</span> → storage device  <span class="m"># slow (ms) · survives power cut</span>
+          <span class="m">~0.1–1 ms SSD · ~5–10 ms HDD</span>
+
+<span class="g">group commit:</span> N txns share ONE fsync → cost/txn ÷ N</div>
+      <table>
+        <tr><th>Engine</th><th>Setting</th><th>Durability on power loss</th></tr>
+        <tr><td>PostgreSQL</td><td><span class="ic">synchronous_commit = on</span></td><td>Full — default</td></tr>
+        <tr><td>PostgreSQL</td><td><span class="ic">= off</span></td><td>May lose recent commits · <b>never corrupt</b></td></tr>
+        <tr><td>MySQL / InnoDB</td><td><span class="ic">innodb_flush_log_at_trx_commit = 1</span></td><td>Full — ACID default</td></tr>
+        <tr><td>MySQL / InnoDB</td><td><span class="ic">= 2</span></td><td>Survives process crash, <b>not</b> power loss</td></tr>
+        <tr><td>MySQL / InnoDB</td><td><span class="ic">= 0</span></td><td>May lose ~1 s of commits</td></tr>
+        <tr><td>SQLite (WAL mode)</td><td><span class="ic">synchronous = FULL</span></td><td>Full</td></tr>
+        <tr><td>SQLite (WAL mode)</td><td><span class="ic">= NORMAL</span></td><td>May lose recent commits · not corrupt</td></tr>
+      </table>
+      <p class="body" style="margin:12px 0 0;"><b>Memorize the trade:</b> relaxing the flush loses <b>recent commits</b>, never <b>consistency</b> — the DB still comes back intact, just slightly in the past. That's why <span class="ic">synchronous_commit=off</span> is a legitimate production choice and <b>turning off the WAL is not</b>.</p>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:12px;">Checkpoints, and why the log doesn't grow forever</div>
+      <p class="body" style="margin:0 0 12px;">A <b>checkpoint</b> flushes dirty data pages and records “everything before LSN <i>X</i> is safely applied.” That does two jobs: recovery only has to replay <b>from the last checkpoint</b> (bounded restart time), and log segments before it can be <b>recycled or archived</b>. Checkpoint too rarely → long recovery + huge log; too often → constant I/O. Postgres ships WAL in 16 MB segments; SQLite calls the equivalent step a <b>WAL checkpoint</b>, folding the <span class="ic">-wal</span> file back into the main DB.</p>
+      <p class="body" style="margin:0;"><b>The torn-page problem:</b> a power cut can leave a data page <b>half-written</b> — and redo assumes it can read the old page to patch it. Fixes: Postgres <b>full-page writes</b> (the first change to a page after a checkpoint logs the whole page), InnoDB's <b>doublewrite buffer</b>. This is why WAL files are bigger than “just the diffs.”</p>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:12px;">Where it's used (it's everywhere)</div>
+      <p class="body" style="margin:0 0 12px;"><b>Databases:</b> PostgreSQL WAL, MySQL/InnoDB redo log, SQLite WAL mode, Oracle redo, SQL Server transaction log. <b>Storage engines:</b> RocksDB / LevelDB / Cassandra / HBase write to a <b>commit log</b> before the in-memory memtable. <b>Filesystems:</b> ext4, XFS and NTFS journal metadata the same way. <b>Consensus:</b> Raft and etcd persist entries to a log before applying them to the state machine. <b>Streaming:</b> Kafka <i>is</i> a durable append-only log, exposed as a product.</p>
+      <p class="body" style="margin:0;"><b>The second superpower:</b> because the log is an ordered record of every change, you get <b>replication</b> free — ship the same log to a replica and it converges to the same state. That's Postgres streaming replication, MySQL binlog, and the basis of <b>point-in-time recovery</b> (restore a base backup, replay the log to 14:32) and <b>change data capture</b>.</p>
+    </div>
+  </div>
+
+  <h2 style="margin:34px 0 4px;">Interview Q&amp;A</h2>
+  <p class="lead" style="font-size:16px;margin:0 0 18px;">Tap a question. From fundamentals to the tricky follow-ups.</p>
+
+  <div class="sec">Fundamentals</div>
+  <div class="qa">
+    <details open><summary>What is a write-ahead log in one sentence?</summary><div class="a">An <b>append-only log</b> of intended changes that is forced to durable storage <b>before</b> the corresponding data pages are modified — so a crash can always be repaired by <b>replaying</b> it.</div></details>
+    <details><summary>What exactly is the “write-ahead rule”?</summary><div class="a">The log record describing a change must reach <b>stable storage before</b> the data page it describes is written to disk. Plus the commit rule: a transaction isn't committed until its <b>commit record</b> is durable.</div></details>
+    <details><summary>Why not just write to the data file directly?</summary><div class="a">A data-file update is a <b>random, multi-byte, possibly multi-page</b> mutation. Crash halfway and the row or page is <b>corrupt</b> — you can't even tell what the old value was. The log makes the change <b>atomic</b>: either the record is fully there (redo it) or it isn't (ignore it).</div></details>
+    <details><summary>Which ACID properties does it give you?</summary><div class="a"><b>Atomicity</b> (all-or-nothing via redo/undo) and <b>Durability</b> (committed survives crash). Isolation comes from locking/MVCC, not the WAL — a common mix-up.</div></details>
+    <details><summary>Redo vs undo — what's the difference?</summary><div class="a"><b>Redo</b> re-applies committed changes that never reached the data file. <b>Undo</b> rolls back changes from transactions that never committed. ARIES does both: <b>repeat history</b> (redo everything), then <b>undo the losers</b>.</div></details>
+  </div>
+
+  <div class="sec">Durability &amp; fsync</div>
+  <div class="qa">
+    <details><summary>Isn't a successful write() enough?</summary><div class="a">No — and this is the single most common miss. <span class="ic">write()</span> only copies into the <b>OS page cache</b>. It survives your process crashing, but a <b>power cut loses it</b>. Durability requires <span class="ic">fsync()</span>/<span class="ic">fdatasync()</span> to return.</div></details>
+    <details><summary>So when is a transaction actually “committed”?</summary><div class="a">The instant its <b>commit record is durably on disk</b>. Not when the SQL ran, not when <span class="ic">write()</span> returned. Only after that may you acknowledge the client — otherwise you've promised something you can lose.</div></details>
+    <details><summary>fsync is slow. How do you keep throughput up?</summary><div class="a"><b>Group commit</b>: batch concurrent transactions and flush them with <b>one</b> fsync, so the cost is amortized across N commits. Also use <span class="ic">fdatasync</span> (skips metadata), keep the log on its own fast device, and let the log write be <b>sequential</b>.</div></details>
+    <details><summary>Can you turn the flush off?</summary><div class="a">Yes, and it's a real choice: <span class="ic">synchronous_commit=off</span> / <span class="ic">innodb_flush_log_at_trx_commit=2</span>. You risk losing the <b>last few hundred ms of commits</b> — but the database still recovers to a <b>consistent</b> state. Losing recent data ≠ corruption.</div></details>
+    <details><summary>What if the disk lies about fsync?</summary><div class="a">Consumer drives with a <b>volatile write cache</b> can ack a flush before the data is on the platter — durability silently breaks. Mitigations: enable write barriers / FUA, disable the volatile cache, or use drives with power-loss protection. Historically the cause of many “impossible” corruptions.</div></details>
+  </div>
+
+  <div class="sec">Recovery</div>
+  <div class="qa">
+    <details><summary>Walk me through crash recovery.</summary><div class="a"><b>Analysis</b> — start at the last checkpoint, find dirty pages and in-flight transactions. <b>Redo</b> — replay forward, re-applying every record whose <span class="ic">LSN &gt; pageLSN</span>. <b>Undo</b> — roll back transactions with no commit record. That's ARIES.</div></details>
+    <details><summary>What's an LSN and why does it matter?</summary><div class="a">A monotonically increasing <b>log sequence number</b>. Each page stores the LSN of the last record applied to it, so recovery can ask “has this page already seen this record?” That's what makes redo <b>idempotent</b>.</div></details>
+    <details><summary>Why must replay be idempotent?</summary><div class="a">Because recovery itself can crash and restart. Replaying the same record twice must be a no-op — guaranteed by the <span class="ic">LSN &gt; pageLSN</span> check. Without it, a crash during recovery could double-apply a change.</div></details>
+    <details><summary>What is a checkpoint and why do you need one?</summary><div class="a">A point where dirty pages are flushed and “everything before LSN X is applied” is recorded. It <b>bounds recovery time</b> (replay only from there) and lets old log segments be <b>recycled</b>. Without checkpoints, restart time and log size grow without limit.</div></details>
+    <details><summary>What's a torn page and how is it handled?</summary><div class="a">A power cut mid-page-write leaves a page <b>partially updated</b> — redo can't safely patch it because its “before” image is garbage. Postgres logs the <b>full page image</b> on first touch after a checkpoint; InnoDB uses the <b>doublewrite buffer</b>.</div></details>
+  </div>
+
+  <div class="sec">Systems &amp; design</div>
+  <div class="qa">
+    <details><summary>Design: draft auto-save that survives a crash.</summary><div class="a">Local DB (SQLite/Room) in <b>WAL mode</b>. On each edit, write the change and commit — one append + flush, cheap enough per keystroke if you debounce. On relaunch the engine replays its WAL automatically and the draft is there. Set <span class="ic">synchronous=NORMAL</span> for keystrokes (fast, may lose the last moment) and <span class="ic">FULL</span> before backgrounding.</div></details>
+    <details><summary>How does WAL enable replication and PITR?</summary><div class="a">The log is a <b>totally ordered record of every change</b>. Ship it to a replica and it converges to identical state (Postgres streaming replication, MySQL binlog). Keep it alongside a base backup and you can <b>replay to any point in time</b>. Also the foundation of CDC (Debezium reads the log).</div></details>
+    <details><summary>Where does WAL show up outside databases?</summary><div class="a"><b>Filesystems</b> (ext4/XFS/NTFS journaling), <b>LSM engines</b> (RocksDB/Cassandra commit log in front of the memtable), <b>consensus</b> (Raft persists entries before applying them), and <b>Kafka</b>, which is a durable append-only log sold as a product.</div></details>
+    <details><summary>How does WAL interact with an LSM tree?</summary><div class="a">Writes go to the <b>commit log</b> (durability) and the in-memory <b>memtable</b> (readability). When the memtable flushes to an SSTable, the covering log segment can be discarded. The WAL exists purely to protect the memtable, which is volatile.</div></details>
+    <details><summary>Where do you put the WAL for performance?</summary><div class="a">Ideally a <b>separate, low-latency device</b>, since commit latency is bound by log fsync and the access pattern is <b>sequential</b> — it shouldn't contend with random data-file I/O. Postgres exposes this by moving <span class="ic">pg_wal</span> to its own volume.</div></details>
+  </div>
+
+  <div class="sec">Tricky follow-ups</div>
+  <div class="qa">
+    <details><summary>WAL writes everything twice — isn't that slower?</summary><div class="a">Usually <b>faster</b>. The log write is a small <b>sequential append</b>; the data write it replaces is a <b>random page write</b>. You trade random I/O now for sequential I/O now plus batched, coalesced random I/O later — and many updates to the same page collapse into one flush.</div></details>
+    <details><summary>Does a WAL protect against disk failure or bad code?</summary><div class="a">No. It protects against <b>crash and power loss</b> only. A dead disk, a corrupted file, an <span class="ic">rm -rf</span>, or a bug writing wrong values are all faithfully replayed. That's what <b>backups and replicas</b> are for — different failure domain.</div></details>
+    <details><summary>The WAL keeps growing and filled my disk. Why?</summary><div class="a">Something is <b>pinning</b> segments: a stale replication slot, an idle-in-transaction session, a failing archive command, or checkpoints too far apart. The log can't recycle past the oldest thing still needing it — a classic Postgres outage.</div></details>
+    <details><summary>Group commit increases latency for a single transaction. Justify it.</summary><div class="a">One transaction waits a few extra ms to join a batch, but <b>throughput</b> rises roughly with batch size because fsync cost is amortized. Under load, p99 usually <b>improves</b> — without batching, every commit queues behind its own flush.</div></details>
+    <details><summary>Is a WAL the same as an undo log?</summary><div class="a">Related but distinct. The WAL is the durable stream of changes; <b>redo</b> lives there. <b>Undo</b> information (old values, for rollback and MVCC reads) may live in the same log (Postgres) or a separate structure (InnoDB's undo tablespaces). ARIES logs both and even logs its undo work as <b>compensation records</b> so undo survives a crash too.</div></details>
+  </div>
+
+  <div class="card" style="background:var(--dbg);border-color:var(--dhair);box-shadow:var(--shadowd);padding:26px 30px;margin:26px 0 22px;">
+    <div class="grain" style="mix-blend-mode:screen;opacity:.06;"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--dtaupe);margin-bottom:14px;">Say this in the interview</div>
+      <ul class="lines">
+        <li><span class="b">▸</span><span>“<b>Write down what you're about to do — before you do it.</b> The log record is durable before the data page changes.”</span></li>
+        <li><span class="b">▸</span><span>“Committed means the <b>commit record is fsync'd</b> — not that <span class="mono">write()</span> returned. Page cache is not durability.”</span></li>
+        <li><span class="b">▸</span><span>“Recovery = <b>redo from the last checkpoint, then undo the losers</b>. <span class="mono">LSN &gt; pageLSN</span> makes replay idempotent.”</span></li>
+        <li><span class="b">▸</span><span>“It's <b>faster</b> despite writing twice — a sequential append replaces a random page write, and fsyncs batch via <b>group commit</b>.”</span></li>
+        <li><span class="b">▸</span><span>“Free bonus: the log <b>is</b> replication, PITR and CDC. Relaxing the flush loses recent commits, <b>never consistency</b>.”</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;padding:4px 4px 0;">
+    <div class="lead" style="font-size:16px;">Reel: <b style="font-style:normal;">Write-Ahead Log</b> · Episode #12 &nbsp;→&nbsp; Next: <b style="font-style:normal;">Leader Election</b></div>
+    <div class="mono" style="font-size:12px;color:var(--taupe);">Follow @systemsketch · one concept, sketched</div>
+  </div>
+
+</div>
+</body>
+</html>
