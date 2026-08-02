@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cache Stampede — the cheat sheet</title>
+<meta name="description" content="Why the cache protecting your database is what takes it down — synchronised expiry, why jitter isn't enough for one hot key, request coalescing, and 23 interview Q&A. SystemSketch cheat sheet, Day 15.">
+<style>
+  :root{
+    --paper:#F0EEE6; --ink:#141413; --manilla:#F5E3C7; --tint:#F2ECE0;
+    --taupe:#8A8172; --kraft:#B8A98C; --hair:rgba(20,20,19,.14); --green:#3F7A4F;
+    --clay:#CC785C; --clay-line:#D97757; --red:#B24438;
+    --dbg:#1A1915; --dtext:#E8E4D8; --dhair:rgba(232,228,216,.16); --dtaupe:#9C927E;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --chip:inset 0 1px 0 rgba(255,255,255,.7),0 1px 1px rgba(20,20,19,.04),0 5px 12px rgba(20,20,19,.08);
+    --shadow:0 1px 1px rgba(20,20,19,.04),0 6px 14px rgba(20,20,19,.08),0 18px 40px rgba(20,20,19,.06);
+    --shadowd:0 1px 1px rgba(0,0,0,.3),0 8px 20px rgba(0,0,0,.4),0 24px 50px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:#E5E0D3;color:var(--ink);font-family:var(--sans);
+       -webkit-font-smoothing:antialiased;line-height:1.5;}
+  .wrap{max-width:900px;margin:0 auto;padding:34px 24px 90px;}
+  .grain{position:absolute;inset:0;pointer-events:none;opacity:.05;mix-blend-mode:multiply;
+         background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+  a{color:var(--clay);text-decoration:none;} a:hover{color:var(--clay-line);}
+  .card{position:relative;border:1px solid var(--hair);background:var(--paper);border-radius:14px;
+        box-shadow:var(--shadow);overflow:hidden;}
+  .in{position:relative;}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--taupe);}
+  .eyebrow{font-weight:700;font-size:12px;letter-spacing:.15em;text-transform:uppercase;}
+  .lead{font-family:var(--serif);font-style:italic;color:#403d37;}
+  .mono{font-family:var(--mono);}
+  .clay{color:var(--clay);} .green{color:var(--green);} .red{color:var(--red);}
+  h1{font-family:var(--serif);font-weight:600;font-size:54px;line-height:1.02;letter-spacing:-.02em;margin:20px 0 0;}
+  h2{font-family:var(--serif);font-weight:600;font-size:30px;letter-spacing:-.02em;margin:0 0 4px;}
+  .u{position:relative;white-space:nowrap;}
+  .u svg{position:absolute;left:-2%;bottom:-9px;width:104%;height:12px;overflow:visible;}
+  ul.lines{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;}
+  ul.lines li{display:flex;gap:11px;font-size:15px;line-height:1.55;color:var(--dtext);}
+  ul.lines .b{font-family:var(--serif);font-weight:700;color:var(--clay);}
+  .nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+  .backlink{font-size:14px;font-weight:600;color:var(--taupe);}
+  .backlink:hover{color:var(--clay);}
+  /* the TTL board — the reel's beat 3, as static art */
+  .board{display:flex;flex-direction:column;gap:9px;margin:6px 0 2px;}
+  .trow{display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:12.5px;color:var(--taupe);}
+  .trow .k{flex:0 0 108px;}
+  .trow .bar{flex:1;height:15px;border-radius:8px;background:var(--tint);border:1px solid var(--hair);position:relative;}
+  .trow .bar i{position:absolute;top:-4px;width:3px;height:23px;border-radius:2px;background:var(--kraft);}
+  .trow .bar i.hit{background:var(--clay);width:4px;}
+  .rec{border:1.5px solid var(--hair);background:var(--tint);border-radius:9px;padding:11px 13px;
+       font-family:var(--mono);font-size:12.5px;line-height:1.5;color:var(--kraft);box-shadow:var(--chip);}
+  .step{display:flex;gap:13px;align-items:flex-start;margin:18px 0 0;}
+  .step:first-of-type{margin-top:4px;}
+  .num{flex:0 0 25px;height:25px;border-radius:50%;background:var(--ink);color:var(--paper);font-family:var(--mono);
+       font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:3px;}
+  .step .t{flex:1;min-width:0;}
+  .caption{text-align:center;font-family:var(--mono);font-size:12px;color:var(--taupe);margin:10px 0 2px;}
+  /* code block */
+  .fx{font-family:var(--mono);font-size:14px;background:var(--dbg);color:var(--dtext);border-radius:12px;
+      padding:16px 20px;margin:12px 0;overflow-x:auto;box-shadow:var(--shadowd);line-height:1.9;
+      white-space:pre;}
+  .fx .c{color:var(--clay-line);} .fx .g{color:#7FB08C;} .fx .m{color:var(--dtaupe);}
+  table{width:100%;border-collapse:collapse;margin:14px 0 4px;font-family:var(--mono);font-size:13px;}
+  th{background:var(--ink);color:var(--paper);text-align:left;padding:9px 12px;font-weight:600;letter-spacing:.02em;}
+  td{padding:9px 12px;border-top:1px solid var(--hair);color:#3a372f;vertical-align:top;}
+  tr:nth-child(even) td{background:var(--tint);}
+  /* Q&A */
+  .qa{display:flex;flex-direction:column;gap:10px;}
+  .qa details{border:1px solid var(--hair);border-radius:12px;background:var(--paper);overflow:hidden;box-shadow:var(--chip);}
+  .qa summary{cursor:pointer;list-style:none;padding:15px 20px;font-weight:600;font-size:16px;color:var(--ink);
+              display:flex;gap:12px;align-items:baseline;}
+  .qa summary::-webkit-details-marker{display:none;}
+  .qa summary::before{content:"Q";font-family:var(--serif);font-weight:700;color:var(--clay);font-size:18px;}
+  .qa summary::after{content:"+";margin-left:auto;color:var(--kraft);font-family:var(--mono);font-size:20px;}
+  .qa details[open] summary::after{content:"–";}
+  .qa details[open] summary{border-bottom:1px solid var(--hair);}
+  .qa .a{padding:14px 20px 18px 46px;color:#2c2a26;font-size:15px;line-height:1.65;}
+  .qa .a code, .ic{font-family:var(--mono);font-size:.87em;background:var(--tint);border:1px solid rgba(20,20,19,.07);border-radius:5px;padding:1px 5px;color:#7a4634;}
+  .sec{font-weight:700;font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--taupe);margin:24px 0 10px;}
+  p.body{font-size:16px;line-height:1.7;color:#2c2a26;}
+
+  /* ---- narrow screens (this page gets read on a phone / screenshotted) ---- */
+  @media (max-width:560px){
+    h1{font-size:40px;}
+    .wrap{padding:22px 16px 70px;}
+    .trow .k{flex:0 0 82px;font-size:11.5px;}
+    /* the swoosh needs one unbroken line; below this width the phrase must wrap,
+       so swap the SVG for a highlighter rule that follows the text instead. */
+    .u{white-space:normal;background:linear-gradient(transparent 63%,rgba(217,119,87,.34) 63%,rgba(217,119,87,.34) 90%,transparent 90%);}
+    .u svg{display:none;}
+    /* card padding is set inline on each card, so it needs !important here;
+       reclaiming 24px of width is what lets the code block fit un-clipped */
+    .card{padding-left:18px !important;padding-right:18px !important;}
+    .fx{font-size:11.5px;padding:13px 14px;}
+    .qa .a{padding:13px 18px 16px;}
+    .qa summary{font-size:15px;padding:14px 16px;}
+    /* stack the table into per-row cards — otherwise the last column sits off
+       screen entirely, and a horizontal scrollbar is invisible in a screenshot */
+    table,tbody,tr,td{display:block;width:100%;}
+    thead{display:none;}
+    table{margin:14px 0 4px;}
+    tr{border:1px solid var(--hair);border-radius:10px;margin:0 0 10px;background:var(--paper);overflow:hidden;}
+    tr:nth-child(even) td{background:transparent;}
+    td{border-top:none;padding:8px 13px;overflow-wrap:anywhere;}
+    td:first-child{background:var(--tint);font-weight:600;border-bottom:1px solid var(--hair);}
+    td[data-l]::before{content:attr(data-l);display:block;font-family:var(--sans);font-size:10px;
+      font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--taupe);margin-bottom:3px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="nav">
+    <a class="backlink" href="./">← all cheat sheets</a>
+    <span class="mono" style="font-size:12px;color:var(--taupe);">SystemSketch · Day 15</span>
+  </div>
+
+  <header class="card" style="padding:38px 34px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <span class="kicker" style="display:inline-block;border:1px solid var(--hair);background:var(--tint);padding:6px 11px;border-radius:4px;">30-Day System Design · Day 15</span>
+      <h1>Cache Stampede <span style="color:var(--taupe);font-weight:400;">— cheat sheet</span></h1>
+      <p class="lead" style="font-size:20px;margin:14px 0 0;max-width:680px;">The cache is the only reason your database survives normal traffic. Give every key the same lifetime and <span class="clay">the shield becomes the weapon</span> — all at once, at noon.</p>
+    </div>
+  </header>
+
+  <div class="card" style="background:var(--manilla);padding:24px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:#8a6d4e;margin-bottom:8px;">The one idea</div>
+      <div style="font-family:var(--serif);font-weight:600;font-size:26px;line-height:1.28;">A cache miss is cheap. <span class="u">Ten thousand at the same instant<svg viewBox="0 0 340 16"><path d="M4 9 C 92 3, 240 13, 336 5" fill="none" stroke="#D97757" stroke-width="4" stroke-linecap="round"/></svg></span> is an outage — because the database was only ever sized for what the cache <i>let through</i>.</div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:14px;">The mental model — how the outage builds</div>
+      <div class="step"><div class="num">1</div><div class="t"><b>11:00 — a batch job refills the cache.</b> Every key it writes gets the same TTL, because that TTL is a constant in the config. Nothing is wrong yet; the cache is at 99.99% hit rate and the database sees a trickle.</div></div>
+      <div class="step"><div class="num">2</div><div class="t"><b>The database was sized for that trickle.</b> This is the part people skip. Connection pool, CPU, IOPS — all provisioned against post-cache traffic, maybe <span class="ic">~1 q/s</span>, not against the <span class="ic">10,000 rps</span> hitting the front door.</div></div>
+      <div class="step"><div class="num">3</div><div class="t"><b>12:00 — every key expires in the same instant.</b> One clock, one deadline. Nothing staggered them, because nothing was asked to.</div></div>
+      <div class="step"><div class="num">4</div><div class="t"><b>Every in-flight request misses and goes to the origin.</b> They don't queue politely — they're concurrent, and each one independently decides to rebuild.</div></div>
+      <div class="step"><div class="num">5</div><div class="t"><b class="red">The database falls over.</b> Now it's self-sustaining: queries time out, so nothing repopulates the cache, so the next wave also misses. Retries add load. The cache stays empty for as long as the origin stays down.</div></div>
+
+      <div class="board" style="margin-top:22px;">
+        <div class="trow"><span class="k">key A</span><span class="bar"><i class="hit" style="right:0"></i></span></div>
+        <div class="trow"><span class="k">key B</span><span class="bar"><i class="hit" style="right:0"></i></span></div>
+        <div class="trow"><span class="k">key C</span><span class="bar"><i class="hit" style="right:0"></i></span></div>
+        <div class="trow"><span class="k">key D</span><span class="bar"><i class="hit" style="right:0"></i></span></div>
+      </div>
+      <div class="caption">one batch job · one clock · one deadline — <span class="clay">12:00:00</span></div>
+
+      <p class="note" style="font-size:13.5px;color:#5a554b;margin:18px 0 0;">Step 5 is the difference between a latency spike and an incident. A stampede that the origin absorbs is a graph you notice on Monday; a stampede that kills the origin is <b>self-healing in the wrong direction</b> — it will not recover on its own until you shed load.</p>
+    </div>
+  </div>
+
+  <div class="card" style="padding:24px 30px;margin-bottom:22px;border:1.5px solid var(--clay);box-shadow:var(--chip),0 0 0 4px rgba(204,120,92,.10);">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow clay" style="margin-bottom:10px;">The trap — where most candidates stop</div>
+      <p style="font-size:16px;line-height:1.7;color:#2c2a26;margin:0;">Ask anyone how to fix a cache stampede and you'll get <b>jitter</b> — randomise the TTLs so keys stop landing on one clock. That is the right answer, and it is <b>only</b> the answer for the <i>many keys</i> case.</p>
+      <div style="font-family:var(--serif);font-weight:600;font-size:24px;line-height:1.34;margin-top:16px;">You cannot stagger <span class="clay">a single cached copy.</span></div>
+      <p style="font-size:16px;line-height:1.7;color:#2c2a26;margin:14px 0 0;">One viral key has one expiry instant. Randomising its TTL moves that instant; it doesn't create more of them. When it goes, every concurrent request still misses <i>together</i> — jitter or not. Different problem, different fix: <b>request coalescing</b>.</p>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:6px;">Two shapes, often confused</div>
+      <table>
+        <thead><tr><th>Shape</th><th>Trigger</th><th>What fixes it</th></tr></thead>
+        <tbody>
+          <tr>
+            <td data-l="Shape">Synchronised expiry</td>
+            <td data-l="Trigger">Many keys, one TTL. Batch refill, deploy-time warm, or a cache flush.</td>
+            <td data-l="Fix"><b>Jitter.</b> Coalescing helps too, but jitter is what removes the correlation.</td>
+          </tr>
+          <tr>
+            <td data-l="Shape">Hot-key expiry</td>
+            <td data-l="Trigger">One key, huge concurrency. The trending item, the homepage, the config blob.</td>
+            <td data-l="Fix"><b>Coalescing</b> (or stale-while-revalidate / early refresh). Jitter does nothing here.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="note" style="font-size:13.5px;color:#5a554b;margin:16px 0 0;">Two neighbours worth naming so you don't conflate them: <b>cache penetration</b> is traffic for keys that <i>don't exist</i>, so every request misses forever — fix with negative caching or a Bloom filter. <b>Cache avalanche</b> is the cache node or cluster itself going away — fix with replication, load shedding and a circuit breaker to the origin.</p>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:6px;">The fix ladder</div>
+      <table>
+        <thead><tr><th>Technique</th><th>Solves</th><th>Cost / catch</th></tr></thead>
+        <tbody>
+          <tr>
+            <td data-l="Technique">TTL jitter</td>
+            <td data-l="Solves">Many keys on one clock</td>
+            <td data-l="Catch">One line of code. Does <b>nothing</b> for a single hot key.</td>
+          </tr>
+          <tr>
+            <td data-l="Technique">Request coalescing<br>(singleflight)</td>
+            <td data-l="Solves">One hot key, high concurrency</td>
+            <td data-l="Catch">Waiters pay the rebuild latency. Needs a lock TTL and a plan for a crashed holder.</td>
+          </tr>
+          <tr>
+            <td data-l="Technique">Stale-while-revalidate</td>
+            <td data-l="Solves">Both — nobody ever waits</td>
+            <td data-l="Catch">Serves bounded-stale data. Needs a soft TTL <i>and</i> a hard TTL.</td>
+          </tr>
+          <tr>
+            <td data-l="Technique">Probabilistic early<br>expiry (XFetch)</td>
+            <td data-l="Solves">Both, with no lock at all</td>
+            <td data-l="Catch">Slightly more origin load by design. You must measure recompute time.</td>
+          </tr>
+          <tr>
+            <td data-l="Technique">Never expire +<br>async refresh</td>
+            <td data-l="Solves">The few keys you can enumerate</td>
+            <td data-l="Catch">A refresher job you now have to operate and monitor.</td>
+          </tr>
+          <tr>
+            <td data-l="Technique">Load shedding at<br>the origin</td>
+            <td data-l="Solves">Nothing — it contains the blast</td>
+            <td data-l="Catch">The backstop for when all of the above are missing or wrong.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="note" style="font-size:13.5px;color:#5a554b;margin:16px 0 0;">In a real system you'd ship rows 1 and 2 together — they address different halves of the same failure. Rows 3 and 4 are the upgrade when the rebuild is slow enough that making anyone wait for it is unacceptable.</p>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:6px;">Jitter — the one-liner</div>
+<div class="fx"><span class="m"># spread expiries out, don't stack them.</span>
+<span class="m"># ±10% is a default; widen for big sets.</span>
+ttl = base + random.uniform(<span class="c">0</span>, <span class="c">0.1</span> * base)
+cache.set(key, value, ex=<span class="c">int</span>(ttl))</div>
+      <p class="note" style="font-size:13.5px;color:#5a554b;margin:10px 0 0;">Note the direction: jitter <b>adds</b> to the base rather than subtracting, so no key expires earlier than you intended. And it is a <i>probabilistic</i> fix — keys are unlikely to land together, not guaranteed apart.</p>
+
+      <div class="eyebrow" style="color:var(--taupe);margin:26px 0 6px;">Coalescing — the shape of it</div>
+<div class="fx">value = cache.get(key)
+<span class="c">if</span> value <span class="c">is not</span> <span class="c">None</span>: <span class="c">return</span> value
+
+lock = <span class="g">f"lock:{key}"</span>
+
+<span class="m"># SET NX PX — one caller wins, and the</span>
+<span class="m"># lock auto-expires if that caller dies.</span>
+<span class="c">if</span> cache.set(lock, token, nx=<span class="c">True</span>, px=<span class="c">5000</span>):
+    <span class="c">try</span>:
+        value = db.query(...)   <span class="m"># the ONE</span>
+        cache.set(key, value, ex=jittered())
+    <span class="c">finally</span>:
+        release_if_owner(lock, token)
+    <span class="c">return</span> value
+
+<span class="m"># everyone else waits, then re-reads.</span>
+<span class="m"># Do NOT spin, and do NOT fall through to</span>
+<span class="m"># the database — that IS the stampede.</span>
+sleep(<span class="c">0.05</span>)
+<span class="c">return</span> cache.get(key) <span class="c">or</span> serve_stale()</div>
+      <p class="note" style="font-size:13.5px;color:#5a554b;margin:10px 0 0;">The <span class="ic">finally</span> + ownership token matters: releasing a lock you no longer own (because yours expired and someone else took it) deletes <i>their</i> lock and reopens the gate. In Go this whole block is <span class="ic">golang.org/x/sync/singleflight</span>; most languages have an equivalent, and an in-process one is often enough.</p>
+    </div>
+  </div>
+
+  <div class="card" style="padding:26px 30px;margin-bottom:22px;">
+    <div class="grain"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--taupe);margin-bottom:14px;">Gotchas that bite in production</div>
+      <div class="step"><div class="num">!</div><div class="t"><b>The lock TTL is shorter than the rebuild.</b> The lock expires mid-query, a second caller takes it, and now you have two rebuilds — and if it's a write-through, possibly a lost update. Size the lock TTL off the <i>p99</i> rebuild, not the median.</div></div>
+      <div class="step"><div class="num">!</div><div class="t"><b>Unbounded waiters.</b> You moved 9,999 requests off the database and onto your own service's threads, sockets and memory. That is the right trade — but cap the wait and fail fast past it, or you've relocated the outage rather than fixed it.</div></div>
+      <div class="step"><div class="num">!</div><div class="t"><b>Jitter applied only on write, never on backfill.</b> The batch job jitters; the lazy-fill path in the request handler uses the raw constant. Six weeks later the keys have re-synchronised. Put the jitter <i>inside</i> the setter so there is one place to get it right.</div></div>
+      <div class="step"><div class="num">!</div><div class="t"><b>A cache flush or a cold restart is a stampede.</b> Jitter doesn't help — every key is missing at once because you deleted them at once. Warm the cache before taking traffic, or ramp traffic in.</div></div>
+      <div class="step"><div class="num">!</div><div class="t"><b>Retries turn a spike into a siege.</b> Client retries on origin timeouts multiply the exact load that caused the timeout. Exponential backoff <i>with jitter</i>, plus a circuit breaker, or the origin never gets the quiet moment it needs to answer one query.</div></div>
+      <div class="step"><div class="num">!</div><div class="t"><b>Negative results aren't cached.</b> If a miss on a nonexistent key always reaches the origin, you have a permanent stampede that no TTL tuning fixes. Cache the "not found" too, with a short TTL.</div></div>
+    </div>
+  </div>
+
+  <div class="sec">Interview Q&amp;A · 23 questions</div>
+
+  <div class="sec" style="margin-top:14px;">The basics</div>
+  <div class="qa">
+    <details><summary>What is a cache stampede?</summary><div class="a">A large number of concurrent requests all miss the cache for the same data at the same time and all go to the origin. Also called <b>dogpile</b>, <b>thundering herd</b>, or <b>cache miss storm</b>. The damage isn't the misses — it's that the origin is provisioned for post-cache traffic, so a burst of pre-cache traffic can exceed its capacity by orders of magnitude.</div></details>
+    <details><summary>Why does giving every key the same TTL cause an outage?</summary><div class="a">Because it <b>correlates</b> their failures. Independent expiries spread origin load smoothly over time; identical expiries collapse it into one instant. A batch job, a deploy-time warm or a cache flush all write thousands of keys within a second or two of each other, so a constant TTL means they die together too.</div></details>
+    <details><summary>The database handled it yesterday. Why not today?</summary><div class="a">Yesterday it saw post-cache traffic. During a stampede it sees <i>pre</i>-cache traffic. With a 99.9% hit rate that's a <b>1000×</b> step change in queries per second. The database isn't degraded — it's being asked to do a job it was never sized for.</div></details>
+    <details><summary>Why doesn't the cache just repopulate and end the problem?</summary><div class="a">It can't, if the origin is saturated. The queries that would fill the cache are the ones timing out. So the cache stays empty, the next wave also misses, and retries pile on. The failure is <b>self-sustaining</b> until you shed load — which is why it's an incident and not a spike.</div></details>
+    <details><summary>Is this the same as cache penetration or cache avalanche?</summary><div class="a">No, though they get lumped together. <b>Penetration</b>: requests for keys that don't exist, so every one misses forever — fix with negative caching or a Bloom filter. <b>Avalanche</b>: the cache node or cluster itself is gone — fix with replication, load shedding and a circuit breaker. <b>Stampede</b>: the keys are cacheable and the cache is healthy; they just expired together.</div></details>
+  </div>
+
+  <div class="sec">Jitter — and its limit</div>
+  <div class="qa">
+    <details><summary>How does jitter fix it, exactly?</summary><div class="a">By decorrelating expiry times. Instead of <span class="ic">ttl = 3600</span>, use <span class="ic">ttl = 3600 + rand(0, 360)</span>. Keys written in the same second now expire spread across a six-minute window, so the origin sees a slope instead of a cliff.</div></details>
+    <details><summary>How much jitter?</summary><div class="a">Wide enough that the expected number of expiries per second is something the origin can absorb. Roughly: <span class="ic">keys ÷ jitter_window ≤ origin_capacity</span>. ±10% is a common default; a million keys refilled by one batch needs a much wider window than a thousand.</div></details>
+    <details><summary>Add or subtract the random component?</summary><div class="a">Add. Subtracting means some keys expire <i>earlier</i> than your intended freshness bound, which quietly increases origin load and can violate whatever staleness contract the TTL represented.</div></details>
+    <details><summary class="clay">Jitter is in. It's one viral key. Are you safe?</summary><div class="a"><b>No — this is the trap.</b> Jitter spreads <i>keys</i> apart from each other. A single key has one cached copy and therefore one expiry instant; randomising its TTL moves that instant but doesn't multiply it. When it expires, every concurrent request for it still misses together. You need <b>request coalescing</b>, early refresh, or stale-while-revalidate.</div></details>
+    <details><summary>So when is jitter enough on its own?</summary><div class="a">When load is spread across many keys with no dominant one, and any single key's concurrency is low enough that a handful of simultaneous rebuilds is harmless. The moment you have a hot key — trending item, homepage, feature-flag blob — jitter alone stops being sufficient.</div></details>
+  </div>
+
+  <div class="sec">Coalescing and locks</div>
+  <div class="qa">
+    <details><summary>What is request coalescing?</summary><div class="a">On a miss, exactly one caller acquires a per-key lock and rebuilds the value; every other caller waits and is then served that same result. N concurrent misses become <b>one</b> origin query. Also called <b>singleflight</b>, request collapsing, or a dogpile lock.</div></details>
+    <details><summary>Per-key lock or one global lock?</summary><div class="a"><b>Per key</b>, always. A global lock serialises every rebuild in the system, so an unrelated slow key blocks everything — you've converted a stampede into a queue. The lock key is normally just <span class="ic">lock:&lt;cache_key&gt;</span>.</div></details>
+    <details><summary>What if the lock holder crashes?</summary><div class="a">The lock must carry a TTL (<span class="ic">SET NX PX</span>), so it self-releases. Waiters must also cap their wait and take a fallback path — serve stale, return a degraded response, or fail fast — rather than blocking indefinitely on a holder that will never return.</div></details>
+    <details><summary>Do you need a distributed lock — Redlock, ZooKeeper?</summary><div class="a">Almost never, and saying so is a good signal. Losing the lock here costs you <b>one extra origin query</b>, not correctness. A single-instance <span class="ic">SET NX PX</span> is the right tool; reaching for consensus means you've mistaken a performance optimisation for a mutual-exclusion requirement. (If the rebuild has side effects, that's a different problem and you shouldn't be doing it under a cache lock at all.)</div></details>
+    <details><summary>Is a per-process lock good enough?</summary><div class="a">Often yes. With N app instances an in-process singleflight reduces the herd from 10,000 to N — which for N in the tens is usually well within origin capacity, with zero extra infrastructure and no lock-expiry edge cases. Reach for the shared lock when N is large or the rebuild is genuinely expensive.</div></details>
+    <details><summary>What's the downside of coalescing?</summary><div class="a">Latency. Every waiter now pays the full rebuild time, so p99 for that key jumps to the rebuild duration. You also concentrate risk: if the one rebuild fails, everybody waiting gets an error simultaneously. Stale-while-revalidate is the answer when neither is acceptable.</div></details>
+  </div>
+
+  <div class="sec">Beyond the lock</div>
+  <div class="qa">
+    <details><summary>How does stale-while-revalidate work?</summary><div class="a">Store a <b>soft TTL</b> alongside the value and keep a longer hard TTL. Past the soft TTL the first reader triggers an async refresh and is served the stale value immediately; everyone else keeps getting the stale value until the refresh lands. Nobody waits, and the origin sees exactly one query. The trade is bounded staleness — you must be able to say how stale is acceptable.</div></details>
+    <details><summary>What is probabilistic early expiry?</summary><div class="a">Each reader independently decides, with a small probability, to refresh <i>before</i> the TTL. The probability rises as expiry approaches and scales with how long the recompute takes, so expensive values get refreshed earlier. Formalised as <b>XFetch</b> in "Optimal Probabilistic Cache Stampede Prevention" (VLDB 2015): recompute when <span class="ic">now − delta × beta × ln(rand()) ≥ expiry</span>. No locks, no coordination — the herd is dissolved statistically.</div></details>
+    <details><summary>When would you just never expire the key?</summary><div class="a">When you can enumerate the hot keys and a background job can keep them fresh — homepage, config, top-N leaderboards. Reads then never miss. The cost is operational: a refresher you have to monitor, and a plan for what happens when it silently stops (stale data with no expiry is worse than no cache).</div></details>
+    <details><summary>How do you defend the origin regardless?</summary><div class="a">Assume every upstream fix will eventually be missing or misconfigured. Bound the origin with a connection-pool cap, a concurrency limiter or queue with a hard ceiling, and a circuit breaker so callers fail fast instead of piling on. That's what keeps a stampede a latency spike instead of an outage.</div></details>
+  </div>
+
+  <div class="sec">Design &amp; debugging</div>
+  <div class="qa">
+    <details><summary>Design the cache layer for a trending-items feed.</summary><div class="a">Jitter every TTL <i>inside</i> the setter so there is one code path. Wrap the rebuild in per-key coalescing so a hot item costs one origin query. For the top few items, add stale-while-revalidate so readers never wait on a refresh. Cap waiters and cap origin concurrency. Emit hit rate, origin QPS and rebuild p99 per key so you can see a herd forming before it lands.</div></details>
+    <details><summary>Your origin QPS spikes 1000× every hour on the hour. Diagnose it.</summary><div class="a">Hourly periodicity plus a step function is synchronised expiry: something writes a batch of keys with a constant TTL. Confirm by sampling TTLs on a random key set (<span class="ic">TTL key</span>) — if they cluster tightly, that's it. Fix by jittering at the setter. If instead one key dominates the miss log, it's hot-key expiry and you need coalescing, not jitter.</div></details>
+    <details><summary>What would you alert on?</summary><div class="a">Not the origin's CPU — by then it's happening. Alert on <b>cache hit rate dropping</b> (leading indicator), <b>origin QPS relative to its provisioned ceiling</b>, and <b>rebuild concurrency per key</b> (if more than one rebuild is in flight for one key, coalescing is broken). A histogram of remaining TTLs will show correlation before it costs you anything.</div></details>
+  </div>
+
+  <div class="card" style="background:var(--dbg);border-color:var(--dhair);box-shadow:var(--shadowd);padding:26px 30px;margin:26px 0 22px;">
+    <div class="grain" style="mix-blend-mode:screen;opacity:.06;"></div>
+    <div class="in">
+      <div class="eyebrow" style="color:var(--dtaupe);margin-bottom:14px;">Say this in the interview</div>
+      <ul class="lines">
+        <li><span class="b">▸</span><span>“The database is sized for <b>post-cache</b> traffic. A stampede shows it pre-cache traffic — that's the whole failure.”</span></li>
+        <li><span class="b">▸</span><span>“A constant TTL <b>correlates</b> expiries. Jitter decorrelates them: <span class="mono">ttl = base + rand(0, 0.1×base)</span>.”</span></li>
+        <li><span class="b">▸</span><span>“<b>Jitter for many keys, a per-key lock for one hot key.</b> You cannot stagger a single cached copy.”</span></li>
+        <li><span class="b">▸</span><span>“Coalescing needs a <b>lock TTL, an ownership token and a capped wait</b> — otherwise you've moved the queue into your own service.”</span></li>
+        <li><span class="b">▸</span><span>“I wouldn't reach for a consensus lock. Losing it costs <b>one extra query</b>, not correctness — <span class="mono">SET NX PX</span> is the right tool.”</span></li>
+        <li><span class="b">▸</span><span>“And I'd bound the origin anyway — <b>concurrency limit plus circuit breaker</b> — because every upstream fix eventually gets misconfigured.”</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;padding:4px 4px 0;">
+    <div class="lead" style="font-size:16px;">Reel: <b style="font-style:normal;">Cache Stampede</b> · Episode #15</div>
+    <div class="mono" style="font-size:12px;color:var(--taupe);">Follow @systemsketch · one concept, sketched</div>
+  </div>
+
+</div>
+</body>
+</html>
